@@ -1,0 +1,953 @@
+{
+	"info": {
+		"_postman_id": "f5a3e7c8-4b6d-4e53-8a1e-3e2d1f5b9d2c",
+		"name": "API Authentication et Comptes Gérés",
+		"description": "Collection pour tester les routes d'authentification et de gestion des comptes gérés",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Vérifier si un utilisateur existe",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const jsonData = pm.response.json();",
+									"",
+									"// Stocker l'email/téléphone utilisé pour les requêtes futures",
+									"pm.environment.set(\"user_email\", pm.request.body.raw ? JSON.parse(pm.request.body.raw).emailOrPhone : \"\");",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Si l'email n'est pas déjà défini, on utilise une valeur par défaut",
+									"if (!pm.environment.get(\"user_email\")) {",
+									"    const defaultEmail = \"user@example.com\";",
+									"    pm.environment.set(\"user_email\", defaultEmail);",
+									"    ",
+									"    // Mettre à jour le corps de la requête avec l'email par défaut",
+									"    const body = JSON.parse(pm.request.body.raw || '{}');",
+									"    body.emailOrPhone = defaultEmail;",
+									"    pm.request.body.raw = JSON.stringify(body, null, 2);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"emailOrPhone\": \"{{user_email}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/check",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"check"
+							]
+						},
+						"description": "Vérifie si un utilisateur existe avec l'email ou le téléphone donné"
+					},
+					"response": []
+				},
+				{
+					"name": "Inscription",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const jsonData = pm.response.json();",
+									"",
+									"// Stocker les informations de l'utilisateur pour les requêtes futures",
+									"if (jsonData && jsonData.accessToken) {",
+									"    pm.environment.set(\"access_token\", jsonData.accessToken);",
+									"    pm.environment.set(\"refresh_token\", jsonData.refreshToken);",
+									"    pm.environment.set(\"user_id\", jsonData.user.id);",
+									"    ",
+									"    // Stocker le mot de passe pour le réutiliser lors de la connexion",
+									"    const requestBody = JSON.parse(pm.request.body.raw);",
+									"    pm.environment.set(\"user_password\", requestBody.password);",
+									"    ",
+									"    if (requestBody.email) {",
+									"        pm.environment.set(\"user_email\", requestBody.email);",
+									"    } else if (requestBody.phone) {",
+									"        pm.environment.set(\"user_phone\", requestBody.phone);",
+									"    }",
+									"    ",
+									"    pm.environment.set(\"user_first_name\", requestBody.firstName);",
+									"    pm.environment.set(\"user_last_name\", requestBody.lastName);",
+									"    ",
+									"    console.log(\"Inscription réussie pour: \" + pm.environment.get(\"user_email\"));",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Générer un email unique basé sur un timestamp pour éviter les conflits",
+									"if (!pm.environment.get(\"user_email\") || pm.environment.get(\"generate_new_user\") === \"true\") {",
+									"    const timestamp = new Date().getTime();",
+									"    const randomEmail = `user.${timestamp}@example.com`;",
+									"    pm.environment.set(\"user_email\", randomEmail);",
+									"    pm.environment.set(\"user_password\", \"MotDePasse123!\");",
+									"    pm.environment.set(\"user_first_name\", \"Jean\");",
+									"    pm.environment.set(\"user_last_name\", \"Dupont\");",
+									"    pm.environment.set(\"generate_new_user\", \"false\");",
+									"    ",
+									"    // Mettre à jour le corps de la requête",
+									"    const body = JSON.parse(pm.request.body.raw || '{}');",
+									"    body.email = randomEmail;",
+									"    body.password = \"MotDePasse123!\";",
+									"    body.firstName = \"Jean\";",
+									"    body.lastName = \"Dupont\";",
+									"    body.gender = \"male\";",
+									"    body.birthDate = \"1990-01-01\";",
+									"    pm.request.body.raw = JSON.stringify(body, null, 2);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"{{user_email}}\",\n    \"password\": \"{{user_password}}\",\n    \"firstName\": \"{{user_first_name}}\",\n    \"lastName\": \"{{user_last_name}}\",\n    \"gender\": \"male\",\n    \"birthDate\": \"1990-01-01\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/signup",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"signup"
+							]
+						},
+						"description": "Crée un nouveau compte utilisateur"
+					},
+					"response": []
+				},
+				{
+					"name": "Connexion",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const jsonData = pm.response.json();",
+									"",
+									"if (jsonData && jsonData.accessToken) {",
+									"    pm.environment.set(\"access_token\", jsonData.accessToken);",
+									"    pm.environment.set(\"refresh_token\", jsonData.refreshToken);",
+									"    pm.environment.set(\"user_id\", jsonData.user.id);",
+									"    ",
+									"    // Stockez d'autres informations utiles de l'utilisateur",
+									"    if (jsonData.user) {",
+									"        if (jsonData.user.email) pm.environment.set(\"user_email\", jsonData.user.email);",
+									"        if (jsonData.user.phone) pm.environment.set(\"user_phone\", jsonData.user.phone);",
+									"        if (jsonData.user.firstName) pm.environment.set(\"user_first_name\", jsonData.user.firstName);",
+									"        if (jsonData.user.lastName) pm.environment.set(\"user_last_name\", jsonData.user.lastName);",
+									"    }",
+									"    ",
+									"    console.log(\"Connexion réussie pour: \" + pm.environment.get(\"user_email\"));",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Utilisez les identifiants stockés s'ils existent",
+									"if (pm.environment.get(\"user_email\") && pm.environment.get(\"user_password\")) {",
+									"    const body = JSON.parse(pm.request.body.raw || '{}');",
+									"    body.emailOrPhone = pm.environment.get(\"user_email\");",
+									"    body.password = pm.environment.get(\"user_password\");",
+									"    pm.request.body.raw = JSON.stringify(body, null, 2);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"emailOrPhone\": \"{{user_email}}\",\n    \"password\": \"{{user_password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/signin",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"signin"
+							]
+						},
+						"description": "Authentifie un utilisateur et retourne des tokens d'accès et de rafraîchissement"
+					},
+					"response": []
+				},
+				{
+					"name": "Connexion sociale",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const jsonData = pm.response.json();",
+									"",
+									"if (jsonData && jsonData.accessToken) {",
+									"    pm.environment.set(\"access_token\", jsonData.accessToken);",
+									"    pm.environment.set(\"refresh_token\", jsonData.refreshToken);",
+									"    pm.environment.set(\"user_id\", jsonData.user.id);",
+									"    ",
+									"    // Stockez d'autres informations utiles de l'utilisateur",
+									"    if (jsonData.user) {",
+									"        if (jsonData.user.email) pm.environment.set(\"user_email\", jsonData.user.email);",
+									"        if (jsonData.user.firstName) pm.environment.set(\"user_first_name\", jsonData.user.firstName);",
+									"        if (jsonData.user.lastName) pm.environment.set(\"user_last_name\", jsonData.user.lastName);",
+									"    }",
+									"    ",
+									"    console.log(\"Connexion sociale réussie pour: \" + pm.environment.get(\"user_email\"));",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Utilisez les identifiants stockés si disponibles",
+									"if (pm.environment.get(\"user_email\") && pm.environment.get(\"user_first_name\") && pm.environment.get(\"user_last_name\")) {",
+									"    const body = JSON.parse(pm.request.body.raw || '{}');",
+									"    body.email = pm.environment.get(\"user_email\");",
+									"    body.firstName = pm.environment.get(\"user_first_name\");",
+									"    body.lastName = pm.environment.get(\"user_last_name\");",
+									"    pm.request.body.raw = JSON.stringify(body, null, 2);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"provider\": \"google\",\n    \"token\": \"social-token-example\",\n    \"email\": \"{{user_email}}\",\n    \"firstName\": \"{{user_first_name}}\",\n    \"lastName\": \"{{user_last_name}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/social",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"social"
+							]
+						},
+						"description": "Authentifie un utilisateur via un réseau social"
+					},
+					"response": []
+				},
+				{
+					"name": "Rafraîchir le token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const jsonData = pm.response.json();",
+									"",
+									"if (jsonData && jsonData.accessToken) {",
+									"    pm.environment.set(\"access_token\", jsonData.accessToken);",
+									"    pm.environment.set(\"refresh_token\", jsonData.refreshToken);",
+									"    ",
+									"    console.log(\"Token rafraîchi avec succès\");",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Utilisez le refresh token stocké s'il existe",
+									"if (pm.environment.get(\"refresh_token\")) {",
+									"    const body = JSON.parse(pm.request.body.raw || '{}');",
+									"    body.refreshToken = pm.environment.get(\"refresh_token\");",
+									"    pm.request.body.raw = JSON.stringify(body, null, 2);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"refreshToken\": \"{{refresh_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/refresh",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"refresh"
+							]
+						},
+						"description": "Rafraîchit le token d'accès avec un token de rafraîchissement"
+					},
+					"response": []
+				},
+				{
+					"name": "Demander réinitialisation de mot de passe",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Utilisez l'email/téléphone stocké s'il existe",
+									"if (pm.environment.get(\"user_email\")) {",
+									"    const body = JSON.parse(pm.request.body.raw || '{}');",
+									"    body.emailOrPhone = pm.environment.get(\"user_email\");",
+									"    pm.request.body.raw = JSON.stringify(body, null, 2);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"emailOrPhone\": \"{{user_email}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/reset",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"reset"
+							]
+						},
+						"description": "Demande un code de réinitialisation de mot de passe"
+					},
+					"response": []
+				},
+				{
+					"name": "Vérifier code de réinitialisation",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Utilisez l'email/téléphone stocké s'il existe",
+									"if (pm.environment.get(\"user_email\")) {",
+									"    const body = JSON.parse(pm.request.body.raw || '{}');",
+									"    body.emailOrPhone = pm.environment.get(\"user_email\");",
+									"    pm.request.body.raw = JSON.stringify(body, null, 2);",
+									"}",
+									"",
+									"// Vous devez entrer manuellement le code que vous avez reçu par email/SMS",
+									"// Le code sera différent à chaque demande"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const jsonData = pm.response.json();",
+									"",
+									"if (jsonData && jsonData.valid) {",
+									"    // Stocker le code pour l'utiliser dans la réinitialisation de mot de passe",
+									"    const requestBody = JSON.parse(pm.request.body.raw);",
+									"    pm.environment.set(\"reset_code\", requestBody.code);",
+									"    console.log(\"Code de réinitialisation valide: \" + requestBody.code);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"emailOrPhone\": \"{{user_email}}\",\n    \"code\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/verify-code",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"verify-code"
+							]
+						},
+						"description": "Vérifie la validité d'un code de réinitialisation"
+					},
+					"response": []
+				},
+				{
+					"name": "Réinitialiser mot de passe",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Utilisez l'email/téléphone et le code stockés s'ils existent",
+									"if (pm.environment.get(\"user_email\") && pm.environment.get(\"reset_code\")) {",
+									"    const body = JSON.parse(pm.request.body.raw || '{}');",
+									"    body.emailOrPhone = pm.environment.get(\"user_email\");",
+									"    body.code = pm.environment.get(\"reset_code\");",
+									"    ",
+									"    // Définissez un nouveau mot de passe",
+									"    const newPassword = \"NouveauMotDePasse123!\";",
+									"    body.password = newPassword;",
+									"    ",
+									"    // Stockez le nouveau mot de passe pour une connexion ultérieure",
+									"    pm.environment.set(\"user_password\", newPassword);",
+									"    ",
+									"    pm.request.body.raw = JSON.stringify(body, null, 2);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"emailOrPhone\": \"{{user_email}}\",\n    \"code\": \"{{reset_code}}\",\n    \"password\": \"{{user_password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/reset-password",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"reset-password"
+							]
+						},
+						"description": "Réinitialise le mot de passe avec le code de vérification"
+					},
+					"response": []
+				}
+			],
+			"description": "Routes d'authentification pour l'inscription, la connexion, et la gestion des profils utilisateur"
+		},
+		{
+			"name": "Comptes Gérés",
+			"item": [
+				{
+					"name": "Créer un compte géré",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const jsonData = pm.response.json();",
+									"",
+									"if (jsonData && jsonData.id) {",
+									"    pm.environment.set(\"managed_account_id\", jsonData.id);",
+									"    ",
+									"    // Stockez d'autres informations utiles du compte géré",
+									"    if (jsonData.firstName) pm.environment.set(\"managed_first_name\", jsonData.firstName);",
+									"    if (jsonData.lastName) pm.environment.set(\"managed_last_name\", jsonData.lastName);",
+									"    if (jsonData.gender) pm.environment.set(\"managed_gender\", jsonData.gender);",
+									"    if (jsonData.birthDate) pm.environment.set(\"managed_birth_date\", jsonData.birthDate);",
+									"    if (jsonData.avatarUrl) pm.environment.set(\"managed_avatar_url\", jsonData.avatarUrl);",
+									"    ",
+									"    console.log(\"Compte géré créé avec ID: \" + jsonData.id);",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Générer des données aléatoires pour éviter les conflits",
+									"const timestamp = new Date().getTime();",
+									"const randomName = `Enfant-${timestamp % 1000}`;",
+									"",
+									"// Définir les variables du compte géré",
+									"pm.environment.set(\"managed_first_name\", randomName);",
+									"pm.environment.set(\"managed_last_name\", \"Dupont\");",
+									"pm.environment.set(\"managed_gender\", \"female\");",
+									"pm.environment.set(\"managed_birth_date\", \"2010-05-15\");",
+									"pm.environment.set(\"managed_avatar_url\", \"https://example.com/child-avatar.jpg\");",
+									"",
+									"// Mettre à jour le corps de la requête",
+									"const body = JSON.parse(pm.request.body.raw || '{}');",
+									"body.firstName = randomName;",
+									"body.lastName = \"Dupont\";",
+									"body.gender = \"female\";",
+									"body.birthDate = \"2010-05-15\";",
+									"body.avatarUrl = \"https://example.com/child-avatar.jpg\";",
+									"pm.request.body.raw = JSON.stringify(body, null, 2);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"firstName\": \"{{managed_first_name}}\",\n    \"lastName\": \"{{managed_last_name}}\",\n    \"gender\": \"{{managed_gender}}\",\n    \"birthDate\": \"{{managed_birth_date}}\",\n    \"avatarUrl\": \"{{managed_avatar_url}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/managed-accounts",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"managed-accounts"
+							]
+						},
+						"description": "Crée un nouveau compte géré (par exemple pour un enfant)"
+					},
+					"response": []
+				},
+				{
+					"name": "Obtenir tous les comptes gérés",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const jsonData = pm.response.json();",
+									"",
+									"if (jsonData && Array.isArray(jsonData) && jsonData.length > 0) {",
+									"    // Si nous n'avons pas encore de compte géré sélectionné, prenons le premier",
+									"    if (!pm.environment.get(\"managed_account_id\")) {",
+									"        pm.environment.set(\"managed_account_id\", jsonData[0].id);",
+									"        console.log(\"Premier compte géré sélectionné: \" + jsonData[0].id);",
+									"        ",
+									"        // Stockez d'autres informations du compte",
+									"        if (jsonData[0].firstName) pm.environment.set(\"managed_first_name\", jsonData[0].firstName);",
+									"        if (jsonData[0].lastName) pm.environment.set(\"managed_last_name\", jsonData[0].lastName);",
+									"    }",
+									"    ",
+									"    console.log(\"Nombre de comptes gérés: \" + jsonData.length);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/managed-accounts",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"managed-accounts"
+							]
+						},
+						"description": "Récupère tous les comptes gérés par l'utilisateur authentifié"
+					},
+					"response": []
+				},
+				{
+					"name": "Obtenir un compte géré spécifique",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const jsonData = pm.response.json();",
+									"",
+									"if (jsonData && jsonData.id) {",
+									"    // Mettre à jour ou stocker les informations du compte géré",
+									"    if (jsonData.firstName) pm.environment.set(\"managed_first_name\", jsonData.firstName);",
+									"    if (jsonData.lastName) pm.environment.set(\"managed_last_name\", jsonData.lastName);",
+									"    if (jsonData.gender) pm.environment.set(\"managed_gender\", jsonData.gender);",
+									"    if (jsonData.birthDate) pm.environment.set(\"managed_birth_date\", jsonData.birthDate);",
+									"    if (jsonData.avatarUrl) pm.environment.set(\"managed_avatar_url\", jsonData.avatarUrl);",
+									"    ",
+									"    console.log(\"Détails du compte géré récupérés: \" + jsonData.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/managed-accounts/{{managed_account_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"managed-accounts",
+								"{{managed_account_id}}"
+							]
+						},
+						"description": "Récupère les détails d'un compte géré spécifique"
+					},
+					"response": []
+				},
+				{
+					"name": "Mettre à jour un compte géré",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Mettre à jour les informations avec des valeurs modifiées",
+									"let firstName = pm.environment.get(\"managed_first_name\") || \"Enfant\";",
+									"firstName += \"-Updated\";",
+									"pm.environment.set(\"managed_first_name\", firstName);",
+									"",
+									"let lastName = pm.environment.get(\"managed_last_name\") || \"Dupont\";",
+									"lastName += \"-Updated\";",
+									"pm.environment.set(\"managed_last_name\", lastName);",
+									"",
+									"// Inverser le genre",
+									"const currentGender = pm.environment.get(\"managed_gender\") || \"female\";",
+									"const newGender = currentGender === \"female\" ? \"male\" : \"female\";",
+									"pm.environment.set(\"managed_gender\", newGender);",
+									"",
+									"// Mettre à jour la date de naissance",
+									"pm.environment.set(\"managed_birth_date\", \"2010-06-15\");",
+									"",
+									"// Mettre à jour le corps de la requête",
+									"const body = JSON.parse(pm.request.body.raw || '{}');",
+									"body.firstName = firstName;",
+									"body.lastName = lastName;",
+									"body.gender = newGender;",
+									"body.birthDate = \"2010-06-15\";",
+									"pm.request.body.raw = JSON.stringify(body, null, 2);"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const jsonData = pm.response.json();",
+									"",
+									"if (jsonData && jsonData.id) {",
+									"    // Mettre à jour les informations du compte géré",
+									"    if (jsonData.firstName) pm.environment.set(\"managed_first_name\", jsonData.firstName);",
+									"    if (jsonData.lastName) pm.environment.set(\"managed_last_name\", jsonData.lastName);",
+									"    if (jsonData.gender) pm.environment.set(\"managed_gender\", jsonData.gender);",
+									"    if (jsonData.birthDate) pm.environment.set(\"managed_birth_date\", jsonData.birthDate);",
+									"    ",
+									"    console.log(\"Compte géré mis à jour: \" + jsonData.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"firstName\": \"{{managed_first_name}}\",\n    \"lastName\": \"{{managed_last_name}}\",\n    \"gender\": \"{{managed_gender}}\",\n    \"birthDate\": \"{{managed_birth_date}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/managed-accounts/{{managed_account_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"managed-accounts",
+								"{{managed_account_id}}"
+							]
+						},
+						"description": "Met à jour les informations d'un compte géré"
+					},
+					"response": []
+				},
+				{
+					"name": "Mettre à jour l'avatar d'un compte géré",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Générer une nouvelle URL d'avatar",
+									"const timestamp = new Date().getTime();",
+									"const newAvatarUrl = `https://example.com/new-child-avatar-${timestamp}.jpg`;",
+									"pm.environment.set(\"managed_avatar_url\", newAvatarUrl);",
+									"",
+									"// Mettre à jour le corps de la requête",
+									"const body = JSON.parse(pm.request.body.raw || '{}');",
+									"body.avatarUrl = newAvatarUrl;",
+									"pm.request.body.raw = JSON.stringify(body, null, 2);"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"console.log(\"Avatar du compte géré mis à jour avec: \" + pm.environment.get(\"managed_avatar_url\"));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"avatarUrl\": \"{{managed_avatar_url}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/managed-accounts/{{managed_account_id}}/avatar",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"managed-accounts",
+								"{{managed_account_id}}",
+								"avatar"
+							]
+						},
+						"description": "Met à jour l'avatar d'un compte géré"
+					},
+					"response": []
+				},
+				{
+					"name": "Supprimer un compte géré",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"console.log(\"Compte géré supprimé: \" + pm.environment.get(\"managed_account_id\"));",
+									"",
+									"// Effacer l'ID du compte géré supprimé",
+									"pm.environment.unset(\"managed_account_id\");"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/managed-accounts/{{managed_account_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"managed-accounts",
+								"{{managed_account_id}}"
+							]
+						},
+						"description": "Supprime un compte géré"
+					},
+					"response": []
+				}
+			],
+			"description": "Routes pour la gestion des comptes gérés (par exemple, des comptes enfants gérés par un parent)"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Script global exécuté avant chaque requête",
+					"// Ici, on peut ajouter une logique commune pour toutes les requêtes",
+					"",
+					"// Par exemple, vérifier si le token d'accès est expiré et le rafraîchir",
+					"// Ceci nécessiterait un calcul d'expiration basé sur des timestamps",
+					"",
+					"// Pour le moment, on s'assure que les variables de base sont initialisées",
+					"if (!pm.environment.get(\"base_url\")) {",
+					"    pm.environment.set(\"base_url\", \"http://localhost:8080\");",
+					"}"
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Script global exécuté après chaque requête",
+					"// Ici, on peut ajouter une logique commune pour traiter les réponses",
+					"",
+					"// Par exemple, gérer les erreurs communes",
+					"if (pm.response.code === 401) {",
+					"    console.log(\"Erreur d'authentification - Votre token est peut-être expiré\");",
+					"}"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string"
+		}
+	]
+}
