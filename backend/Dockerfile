@@ -16,7 +16,7 @@ RUN go mod download
 COPY . .
 
 # Construire l'application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o auth-server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o auth-server ./cmd/api
 
 # Deuxième étape - Image d'exécution
 FROM alpine:3.18
