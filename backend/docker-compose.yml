@@ -26,8 +26,7 @@ services:
       - mongodb
     networks:
       - auth-network
-    # Override the default CMD to ensure MONGO_URI is set correctly at runtime
-    command: ["sh", "-c", "export MONGO_URI='mongodb://mongodb:27017' &amp;&amp; ./auth-server"]
+    # ENTRYPOINT in Dockerfile now handles setting MONGO_URI
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 30s

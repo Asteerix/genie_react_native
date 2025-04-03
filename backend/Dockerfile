@@ -39,8 +39,15 @@ COPY --from=builder /app/auth-server .
 # Définir la propriété des fichiers à l'utilisateur non-root
 RUN chown -R appuser:appuser /app
 
+# Copier et rendre exécutable le script d'entrée
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 # Utiliser l'utilisateur non-root
 USER appuser
+
+# Définir le script d'entrée
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # Exposer le port
 EXPOSE 8080
