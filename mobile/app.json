@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -15,7 +15,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.genieapp.mobile",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -26,6 +29,11 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "description": "Quickly generate React Native components with AI"
+    "description": "Quickly generate React Native components with AI",
+    "extra": {
+      "eas": {
+        "projectId": "ecd93eb2-d3bb-4e2c-8365-33d8dffc94b1"
+      }
+    }
   }
 }
