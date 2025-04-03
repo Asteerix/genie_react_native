@@ -65,10 +65,18 @@ func Connect(cfg config.MongoDBConfig) (*Database, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// Déterminer l'URI à utiliser (CLI flag a priorité)
+	uriToUse := cfg.URI // Default to env var URI
+	if cfg.CLI_URI != "" {
+		uriToUse = cfg.CLI_URI
+		log.Info().Str("mongo_uri", uriToUse).Msg("Utilisation de l'URI MongoDB fournie par le flag CLI")
+	} else {
+		log.Info().Str("mongo_uri", uriToUse).Msg("Utilisation de l'URI MongoDB depuis l'environnement ou la valeur par défaut")
+	}
+
 	// Préparer les options de connexion
-	log.Info().Str("mongo_uri", cfg.URI).Msg("Tentative de connexion à MongoDB avec cette URI") // Log added for debugging
-	clientOptions := options.Client().ApplyURI(cfg.URI)
-	
+	clientOptions := options.Client().ApplyURI(uriToUse)
+
 	// Ajouter l'authentification si fournie
 	if cfg.Username != "" && cfg.Password != "" {
 		clientOptions.SetAuth(options.Credential{

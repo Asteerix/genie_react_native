@@ -35,7 +35,7 @@ type ServerConfig struct {
 
 // MongoDBConfig contient la configuration de MongoDB
 type MongoDBConfig struct {
-	URI             string
+	URI             string // URI from env var or default
 	Database        string
 	Username        string
 	Password        string
@@ -43,6 +43,7 @@ type MongoDBConfig struct {
 	MaxPoolSize     uint64
 	MinPoolSize     uint64
 	MaxConnIdleTime time.Duration
+	CLI_URI         string // URI passed via command-line flag (takes precedence)
 }
 
 // JWTConfig contient la configuration des JSON Web Tokens
@@ -93,8 +94,8 @@ type StorageConfig struct {
 	MediaBucketPath   string
 }
 
-// Load charge la configuration à partir des variables d'environnement
-func Load() (*Config, error) {
+// Load charge la configuration à partir des variables d'environnement et des flags CLI
+func Load(cliMongoURI string) (*Config, error) { // Accept CLI flag value
 	// Charger les variables d'environnement depuis .env si le fichier existe
 	if _, err := os.Stat(".env"); err == nil {
 		if err := godotenv.Load(); err != nil {
@@ -123,7 +124,8 @@ func Load() (*Config, error) {
 			CorsOrigins:     getSliceEnv("CORS_ORIGINS", []string{"*"}),
 		},
 		MongoDB: MongoDBConfig{
-			URI:             getEnv("MONGODB_URI", "mongodb://localhost:27017"), // Utilise getEnv qui loggue aussi
+			URI:             getEnv("MONGODB_URI", "mongodb://localhost:27017"), // Still load from env as fallback/log
+			CLI_URI:         cliMongoURI,                                       // Store CLI flag value
 			Database:        getEnv("MONGODB_DATABASE", "auth_app"),
 			Username:        getEnv("MONGODB_USERNAME", ""),
 			Password:        getEnv("MONGODB_PASSWORD", ""),

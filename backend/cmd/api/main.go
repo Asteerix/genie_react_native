@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag" // Import flag package
 	"fmt"
 	"net/http"
 	"os"
@@ -28,8 +29,12 @@ import (
 )
 
 func main() {
-	// Initialiser la configuration à partir des variables d'environnement
-	cfg, err := config.Load()
+	// Définir les flags de ligne de commande
+	mongoURIFlag := flag.String("mongo-uri", "", "MongoDB connection URI (overrides environment variable)")
+	flag.Parse()
+
+	// Initialiser la configuration à partir des variables d'environnement et des flags
+	cfg, err := config.Load(*mongoURIFlag) // Pass the flag value to Load
 	if err != nil {
 		log.Fatal().Err(err).Msg("Impossible de charger la configuration")
 	}
