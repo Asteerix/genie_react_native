@@ -102,7 +102,13 @@ func Load() (*Config, error) {
 		} else {
 			log.Info().Msg("Fichier .env chargé avec succès")
 		}
+	} else {
+		log.Info().Msg("Fichier .env non trouvé ou erreur lors de la vérification.")
 	}
+
+	// Log pour vérifier la variable d'environnement système AVANT de définir les valeurs
+	systemMongoURI := os.Getenv("MONGODB_URI")
+	log.Info().Str("system_mongo_uri", systemMongoURI).Msg("Valeur de MONGODB_URI lue depuis l'environnement système")
 
 	// Définir la configuration par défaut
 	config := &Config{
@@ -117,7 +123,7 @@ func Load() (*Config, error) {
 			CorsOrigins:     getSliceEnv("CORS_ORIGINS", []string{"*"}),
 		},
 		MongoDB: MongoDBConfig{
-			URI:             getEnv("MONGODB_URI", "mongodb://localhost:27017"),
+			URI:             getEnv("MONGODB_URI", "mongodb://localhost:27017"), // Utilise getEnv qui loggue aussi
 			Database:        getEnv("MONGODB_DATABASE", "auth_app"),
 			Username:        getEnv("MONGODB_USERNAME", ""),
 			Password:        getEnv("MONGODB_PASSWORD", ""),
@@ -178,10 +184,13 @@ func Load() (*Config, error) {
 
 // Fonctions utilitaires pour récupérer les variables d'environnement
 func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
+	value, exists := os.LookupEnv(key)
+	log.Debug().Str("key", key).Str("value", value).Bool("exists", exists).Msg("Vérification de la variable d'environnement dans getEnv")
+	if !exists || value == "" {
+		log.Debug().Str("key", key).Str("default", defaultValue).Msg("Variable d'environnement non trouvée ou vide, utilisation de la valeur par défaut")
 		return defaultValue
 	}
+	log.Debug().Str("key", key).Str("value", value).Msg("Variable d'environnement trouvée, utilisation de sa valeur")
 	return value
 }
 
