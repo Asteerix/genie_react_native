@@ -1,5 +1,5 @@
 const axios = require('axios');
-const API_URL = 'https://https://6de4-92-184-145-214.ngrok-free.app';
+const API_URL = 'https://http://217.182.129.10:8081';
 
 // Function to create a wishlist
 async function createWishlist(title, description) {

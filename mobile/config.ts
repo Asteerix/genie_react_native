@@ -3,8 +3,8 @@ import { Platform } from 'react-native';
 
 // URLs de l'API pour les différents environnements
 const API_URLS = {
-  development: 'https://6de4-92-184-145-214.ngrok-free.app',
-  local: Platform.OS === 'android' ? 'http://10.0.2.2:8080' : 'https://6de4-92-184-145-214.ngrok-free.app',
+  development: 'http://217.182.129.10:8081',
+  local: Platform.OS === 'android' ? 'http://10.0.2.2:8080' : 'http://217.182.129.10:8081',
   staging: 'https://staging-api.genie-app.com',
   production: 'https://api.genie-app.com'
 };

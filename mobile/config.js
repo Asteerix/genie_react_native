@@ -1,5 +1,5 @@
 // Configuration de l'API - version CommonJS
-const API_BASE_URL = 'https://6de4-92-184-145-214.ngrok-free.app';
+const API_BASE_URL = 'http://217.182.129.10:8081';
 
 module.exports = {
   API_BASE_URL

@@ -922,7 +922,7 @@
 					"",
 					"// Pour le moment, on s'assure que les variables de base sont initialisées",
 					"if (!pm.environment.get(\"base_url\")) {",
-					"    pm.environment.set(\"base_url\", \"https://https://6de4-92-184-145-214.ngrok-free.app\");",
+					"    pm.environment.set(\"base_url\", \"https://http://217.182.129.10:8081\");",
 					"}"
 				]
 			}
@@ -946,7 +946,7 @@
 	"variable": [
 		{
 			"key": "base_url",
-			"value": "https://https://6de4-92-184-145-214.ngrok-free.app",
+			"value": "https://http://217.182.129.10:8081",
 			"type": "string"
 		}
 	]
