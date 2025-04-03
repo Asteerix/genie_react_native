@@ -1,23 +1,29 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, ActivityIndicator, StyleSheet, Text, Image } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../types/navigation';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type LoadingScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Loading'>;
 
 const LoadingScreen: React.FC = () => {
   const { isLoading, user } = useAuth();
   const navigation = useNavigation<LoadingScreenNavigationProp>();
+  // L'état isLoading et user du AuthContext sont suffisants
 
+  // Rediriger l'utilisateur une fois que le chargement initial de AuthContext est terminé
   useEffect(() => {
+    // Attendre que AuthContext ait fini de charger l'état initial
     if (!isLoading) {
-      // Si l'utilisateur est connecté, aller à l'écran d'accueil
-      // Sinon, aller à l'écran de connexion
       if (user) {
-        navigation.replace('AddWish');
+        // Utilisateur connecté, rediriger vers la page d'accueil principale
+        console.log('AuthContext: Utilisateur trouvé, redirection vers HomePage');
+        navigation.replace('HomePage');
       } else {
+        // Utilisateur non connecté, rediriger vers l'écran de connexion
+        console.log('AuthContext: Aucun utilisateur trouvé, redirection vers Login');
         navigation.replace('Login');
       }
     }

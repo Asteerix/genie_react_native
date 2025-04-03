@@ -1,863 +1,622 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Platform, Modal } from 'react-native';
-import { Ionicons, FontAwesome5, Feather } from '@expo/vector-icons';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text, // Ajout de Text ici
+  StatusBar,
+  SafeAreaView,
+  ScrollView,
+  Dimensions,
+  Animated,
+  RefreshControl,
+  TouchableOpacity, // Gardé pour le handle de la bottom sheet
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons'; // Gardé pour le handle et refresh
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import BottomTabBar from '../components/BottomTabBar';
-import ProfileBottomSheet from '../components/ProfileBottomSheet';
-import { useProfile, ProfileType } from '../context/ProfileContext';
+import WishlistInviteModal from '../components/WishlistInviteModal'; // Gardé pour la modale statique
+import CreateWishlistModal from '../components/CreateWishlistModal';
+// import SearchModal from '../components/SearchModal'; // Supprimé car non utilisé dans le JSX final
+import { toast } from 'sonner-native';
+import { useWishlist } from '../context/WishlistContext';
+import { useProfile } from '../context/ProfileContext';
+import {
+  WishlistType, // Gardé pour le type d'invitation
+  WishItemType, // Gardé pour handleToggleFavorite/handleDeleteWish
+  getUserWishlists, // Gardé pour fetchDirectFromAPI
+  getUserWishItems, // Gardé pour fetchDirectFromAPI
+  getWishlistInvitations // Gardé pour fetchDirectFromAPI
+} from '../api/wishlists';
+
+// Import des nouveaux composants et styles
+import { styles } from './ProfileScreen/styles/ProfileScreen.styles';
+import ProfileHeader from './ProfileScreen/components/ProfileHeader';
+import AccountCard from './ProfileScreen/components/AccountCard';
+import ProfileCompletionCard from './ProfileScreen/components/ProfileCompletionCard';
+import TransactionsList from './ProfileScreen/components/TransactionsList';
+import ProfileBottomSheetContent from './ProfileScreen/components/ProfileBottomSheetContent';
+
+const { height } = Dimensions.get('window'); // Gardé pour l'animation de la bottom sheet
+
+// Hauteurs de la modal en pourcentage de la hauteur de l'écran
+const MODAL_HEIGHTS = {
+  SMALL: 0.2, // 20%
+  MEDIUM: 0.47, // 47% (Ajusté pour correspondre à l'original)
+  FULL: 0.87 // 87% (Ajusté pour correspondre à l'original)
+};
+
+// Type pour les profils locaux (utilisé par ProfileHeader et AccountCard)
+interface LocalProfileType {
+  id: string;
+  name: string;
+  username: string;
+  balance: number;
+  avatar: string;
+  isAdd: boolean;
+  isPersonal: boolean;
+}
 
 const ProfileScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { activeProfile, currentUser, managedAccounts, setActiveProfile } = useProfile();
-  
-  const [profileCompletion, setProfileCompletion] = useState(50);
-  const [cardView, setCardView] = useState<'front' | 'back'>('front');
-  const [modalVisible, setModalVisible] = useState(false);
-  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
-  
-  // Show profile bottom sheet when component mounts initially
+  const { currentUser, managedAccounts, setActiveProfile: setProfileContext } = useProfile();
+  const {
+    wishlists,
+    wishItems,
+    invitations, // Récupéré du contexte
+    isLoading,
+    error,
+    refreshWishlists,
+    refreshInvitations,
+    respondToWishlistInvitation,
+    editWishItem, // Gardé pour handleToggleFavorite
+    removeWishItem // Gardé pour handleDeleteWish
+  } = useWishlist();
+
+  // États principaux de l'écran
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedProfileIndex, setSelectedProfileIndex] = useState(0);
+  const scrollViewRef = useRef<ScrollView>(null); // Référence pour le scroll principal
+
+  // États et animation de la Bottom Sheet
+  const [modalHeight, setModalHeight] = useState(MODAL_HEIGHTS.MEDIUM);
+  const modalHeightAnim = useRef(new Animated.Value(MODAL_HEIGHTS.MEDIUM * height)).current;
+  const modalScrollViewRef = useRef<ScrollView>(null); // Référence pour le scroll de la bottom sheet
+
+  // États divers
+  const [wishlistInviteVisible, setWishlistInviteVisible] = useState(false); // Pour la modale statique
+  const [lowBalanceWarningDismissed, setLowBalanceWarningDismissed] = useState(false);
+
+  // Données statiques (peuvent être déplacées si nécessaire)
+  const wishlistInviteData = { // Pour la modale statique
+    title: 'Vacances Wishlist',
+    inviter: 'audrianatoulet'
+  };
+  // Supprimer profileCompletionData
+   const transactionsData = [ // Pour TransactionsList (données d'exemple)
+     {
+       id: '1',
+       type: 'invitation' as const, // Utilisation de 'as const' pour typer plus précisément
+       name: 'Invite le',
+       date: '09/12/2024',
+       avatar: require('../assets/icon.png'), // Garder require pour l'exemple
+       amount: null,
+     },
+     {
+       id: '2',
+       type: 'transaction' as const,
+       name: 'Audriana Toulet',
+       avatar: require('../assets/icon.png'),
+       amount: -4,
+     },
+     {
+       id: '3',
+       type: 'transaction' as const,
+       name: 'Paul Marceau',
+       avatar: require('../assets/icon.png'),
+       amount: 25,
+     }
+   ];
+
+
+  // Construction du tableau de profils
+  const profiles: LocalProfileType[] = [
+    ...(currentUser ? [{
+      id: currentUser.id,
+      name: currentUser.name,
+      username: currentUser.username,
+      balance: currentUser.balance,
+      avatar: currentUser.avatar,
+      isAdd: false,
+      isPersonal: true
+    }] : []),
+    ...managedAccounts.map(account => ({
+      id: account.id,
+      name: account.name,
+      username: account.username,
+      balance: account.balance,
+      avatar: account.avatar,
+      isAdd: false,
+      isPersonal: false
+    })),
+    {
+      id: "add",
+      name: "Ajouter",
+      username: "",
+      balance: 0,
+      avatar: "",
+      isAdd: true,
+      isPersonal: false
+    }
+  ];
+
+  // Obtenir le profil actif
+  const activeProfileLocal: LocalProfileType | undefined = profiles[selectedProfileIndex];
+
+  // --- Fonctions de rafraîchissement et de chargement ---
+
+  // Helper pour rafraîchir toutes les données avec timeout
+  const refreshAllData = useCallback(async () => {
+    try {
+      console.log('ProfileScreen - Refreshing all wishlist data...');
+      const timeoutDuration = 10000; // 10 seconds timeout
+
+      const createPromiseWithTimeout = (promise: Promise<any>, name: string) => {
+        return Promise.race([
+          promise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`${name} request timed out after ${timeoutDuration}ms`)), timeoutDuration)
+          )
+        ]);
+      };
+
+      // Utilise les fonctions du contexte directement
+      const refreshResults = await Promise.all([
+        createPromiseWithTimeout(refreshWishlists(), 'Wishlists'),
+        createPromiseWithTimeout(refreshInvitations(), 'Invitations')
+      ]);
+
+      console.log('ProfileScreen - All data refreshed successfully via context');
+      return refreshResults[0] && refreshResults[1]; // Both must succeed
+    } catch (err: any) {
+      console.error('ProfileScreen - Error refreshing data via context:', err);
+      if (err.message && err.message.includes('timed out')) {
+        toast.error('La connexion a expiré. Vérifiez votre connexion.');
+      } else if (err.response && err.response.status === 401) {
+        toast.error('Session expirée. Veuillez vous reconnecter.');
+      } else {
+        toast.error(`Erreur: ${err.message || 'Problème de connexion au serveur'}`);
+      }
+      return false;
+    }
+  }, [refreshWishlists, refreshInvitations]); // Dépendances du useCallback
+
+  // Fonction pour fetch directement depuis l'API (utilisée par pull-to-refresh)
+  const fetchDirectFromAPI = useCallback(async () => {
+    try {
+      console.log('ProfileScreen - Fetching directly from API...');
+      const startTime = Date.now();
+      const results = await Promise.all([
+        getUserWishlists(),
+        getUserWishItems(),
+        getWishlistInvitations()
+      ]);
+      const endTime = Date.now();
+      const responseTime = endTime - startTime;
+      const [directWishlists, directItems, directInvitations] = results;
+      console.log(`ProfileScreen - API Response (${responseTime}ms): ` +
+        `${directWishlists.length} wishlists, ${directItems.length} items, ${directInvitations.length} invitations`);
+      return {
+        wishlists: directWishlists,
+        items: directItems,
+        invitations: directInvitations,
+        responseTime
+      };
+    } catch (err: any) {
+      console.error('ProfileScreen - Error fetching directly from API:', err);
+      toast.error(`Erreur API: ${err.message || 'Problème de connexion'}`);
+      throw err;
+    }
+  }, []); // Pas de dépendances externes
+
+  // Pull-to-refresh
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    console.log('ProfileScreen - Pull-to-refresh triggered');
+    toast.info('Synchronisation directe des données...');
+    try {
+      const apiData = await fetchDirectFromAPI();
+      console.log(`Pull-to-refresh: Données récupérées en ${apiData.responseTime}ms`);
+      // Optionnel: Validation et comparaison des données
+      // ...
+      const refreshSuccess = await refreshAllData(); // Met à jour le contexte
+      if (refreshSuccess) {
+        toast.success(`Données synchronisées: ${apiData.wishlists.length} listes, ${apiData.items.length} vœux`);
+      } else {
+        toast.warning('Synchronisation terminée avec avertissements');
+      }
+    } catch (err: any) {
+      console.error('Erreur lors du pull-to-refresh:', err);
+      toast.error('Échec de la synchronisation directe');
+      // Fallback sur le refresh du contexte si le fetch direct échoue
+      await refreshAllData();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchDirectFromAPI, refreshAllData]); // Dépendances du useCallback
+
+  // Chargement initial des données
   useEffect(() => {
-    // Délai court pour permettre le rendu complet de l'écran
-    const timer = setTimeout(() => {
-      setProfileSheetVisible(true);
-    }, 500);
-    
-    return () => clearTimeout(timer);
-  }, []);
-  
-  // Handle selecting a profile
-  const handleProfileSelect = (profileId: string) => {
-    if (!activeProfile) return;
-    
-    if (profileId === currentUser?.id) {
-      setActiveProfile(currentUser);
+    let isMounted = true;
+    const loadData = async () => {
+      if (isMounted) {
+        console.log('ProfileScreen - Initial data load using context refresh...');
+        toast.info('Chargement des données...');
+        const success = await refreshAllData(); // Utilise la fonction unifiée
+        if (isMounted) {
+            if (success) {
+                toast.success('Données chargées.');
+            } else {
+                // L'erreur est déjà gérée dans refreshAllData
+            }
+        }
+      }
+    };
+    loadData();
+    return () => { isMounted = false; };
+  }, [refreshAllData]); // Dépendance à refreshAllData
+
+  // --- Fonctions de gestion de la Bottom Sheet ---
+
+  const changeModalHeight = useCallback((newHeight: number) => {
+    scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    modalScrollViewRef.current?.scrollTo({ y: 0, animated: false });
+    setModalHeight(newHeight);
+    Animated.spring(modalHeightAnim, {
+      toValue: newHeight * height,
+      useNativeDriver: false,
+      friction: 7,
+      tension: 40,
+    }).start();
+  }, [modalHeightAnim]); // Dépendance à l'animation
+
+  // Modifié pour ne pas descendre en dessous de MEDIUM
+  const handleModalPress = useCallback(() => {
+    if (modalHeight === MODAL_HEIGHTS.MEDIUM) {
+      // Si MEDIUM, monter à FULL
+      changeModalHeight(MODAL_HEIGHTS.FULL);
     } else {
-      const selectedAccount = managedAccounts.find(account => account.id === profileId);
-      if (selectedAccount) {
-        setActiveProfile(selectedAccount);
+      // Si FULL ou SMALL (ou autre), revenir à MEDIUM
+      changeModalHeight(MODAL_HEIGHTS.MEDIUM);
+    }
+  }, [modalHeight, changeModalHeight]); // Dépendances
+
+  // Initialisation de la hauteur de la modal
+  useEffect(() => {
+    changeModalHeight(MODAL_HEIGHTS.MEDIUM);
+  }, [changeModalHeight]); // Dépendance
+
+  // Déterminer l'icône du chevron
+  const getChevronIcon = useCallback(() => {
+    if (modalHeight === MODAL_HEIGHTS.SMALL) return "chevron-up-outline";
+    if (modalHeight === MODAL_HEIGHTS.MEDIUM || modalHeight === MODAL_HEIGHTS.FULL) return "chevron-down-outline";
+    return "chevron-up-outline"; // Par défaut
+  }, [modalHeight]); // Dépendance
+
+  // --- Fonctions de gestion des profils ---
+
+  const goToNextProfile = useCallback(() => {
+    if (selectedProfileIndex < profiles.length - 1) {
+      setSelectedProfileIndex(prevIndex => prevIndex + 1);
+    }
+  }, [selectedProfileIndex, profiles.length]); // Dépendances
+
+  const goToPreviousProfile = useCallback(() => {
+    if (selectedProfileIndex > 0) {
+      setSelectedProfileIndex(prevIndex => prevIndex - 1);
+    }
+  }, [selectedProfileIndex]); // Dépendances
+
+  const handleProfileClick = useCallback((index: number) => {
+    const profile = profiles[index];
+    if (profile.isAdd) {
+      // TODO: Naviguer vers l'écran d'ajout de compte géré
+      console.log("Navigation vers ajout de compte géré");
+      // navigation.navigate('ManagedAccounts'); // TODO: Vérifier les paramètres de navigation
+    } else {
+      setSelectedProfileIndex(index);
+      // Mettre à jour le profil actif dans le contexte ProfileContext
+      if (profile.id && !profile.isAdd) {
+        setProfileContext({
+          id: profile.id,
+          name: profile.name,
+          username: profile.username,
+          balance: profile.balance,
+          avatar: profile.avatar
+        });
+        // Optionnel: Rafraîchir les données spécifiques au profil si nécessaire
+        // refreshAllData();
       }
     }
-  };
+  }, [profiles, navigation, setProfileContext]); // Dépendances
 
-  const progressColor = () => {
-    if (profileCompletion <= 25) return '#FF6B6B'; // Rouge
-    if (profileCompletion <= 50) return '#FFC043'; // Orange
-    return '#4CD964'; // Vert
-  };
+  // --- Handlers pour les actions (passés aux composants enfants) ---
 
-  const progressBackgroundColor = () => {
-    if (profileCompletion <= 25) return '#FFEEEE';
-    if (profileCompletion <= 50) return '#FFF6E5';
-    return '#EEFFF0';
-  };
+  const handleCreateWishlist = useCallback(async (title: string, options?: { description?: string, addAdmins?: boolean }) => {
+    try {
+      console.log('ProfileScreen - Preparing wishlist creation:', title, options);
+      setShowCreateModal(false); // Ferme la modale de base
+      // Navigue vers l'écran de paramètres pour finaliser
+      navigation.navigate('WishlistSettings', {
+        pendingWishlist: {
+          title,
+          description: options?.description || '',
+          addAdmins: options?.addAdmins || false
+        }
+      });
+    } catch (error) {
+      console.error("ProfileScreen - Error preparing wishlist creation:", error);
+      toast.error("Impossible de préparer la création de la wishlist");
+    }
+  }, [navigation]); // Dépendance
 
-  const handleUserSelection = () => {
-    setModalVisible(false);
-    // Navigation vers l'écran de sélection d'utilisateur pour transfert
-    navigation.navigate('NewMessage', { mode: 'transfer' });
-  };
+  const handleAcceptInvitation = useCallback(async (wishlistId: string) => {
+    try {
+      await respondToWishlistInvitation(wishlistId, true);
+      await refreshAllData(); // Rafraîchit tout pour être sûr
+      toast.success('Invitation acceptée !');
+    } catch (error) {
+      console.error("Erreur lors de l'acceptation de l'invitation:", error);
+      toast.error("Impossible d'accepter l'invitation");
+    }
+  }, [respondToWishlistInvitation, refreshAllData]); // Dépendances
 
-  const handleEventSelection = () => {
-    setModalVisible(false);
-    // Navigation vers l'écran de sélection d'événement pour transfert
-    navigation.navigate('EventSelector');
-  };
+  const handleRejectInvitation = useCallback(async (wishlistId: string) => {
+    try {
+      await respondToWishlistInvitation(wishlistId, false);
+      await refreshInvitations(); // Rafraîchit seulement les invitations
+      toast.info('Invitation refusée');
+    } catch (error) {
+      console.error("Erreur lors du refus de l'invitation:", error);
+      toast.error("Impossible de refuser l'invitation");
+    }
+  }, [respondToWishlistInvitation, refreshInvitations]); // Dépendances
 
-  const handleBankAccountSelection = () => {
-    setModalVisible(false);
-    // Naviguer vers l'écran des comptes bancaires
-    navigation.navigate('BankAccounts');
-  };
+  const handleDismissLowBalanceWarning = useCallback(() => {
+    setLowBalanceWarningDismissed(true);
+  }, []); // Pas de dépendances
+
+  // Handlers pour la modale d'invitation statique
+  const handleAcceptWishlistInvite = useCallback(() => {
+    toast.success('Invitation acceptée ! (Statique)');
+    setWishlistInviteVisible(false);
+    // TODO: Action spécifique si nécessaire
+  }, []);
+  const handleDeclineWishlistInvite = useCallback(() => {
+    toast.info('Invitation refusée (Statique)');
+    setWishlistInviteVisible(false);
+  }, []);
+
+  // Handler pour ajouter de l'argent (depuis la bottom sheet)
+  const handleAddMoney = useCallback(() => {
+    // TODO: Naviguer vers l'écran d'ajout d'argent
+    console.log("Navigation vers ajout d'argent");
+    // navigation.navigate('PaymentMethod'); // TODO: Vérifier les paramètres de navigation
+  }, [navigation]);
+
+  // Handler pour ajouter un vœu (depuis la bottom sheet)
+  const handleAddWish = useCallback(() => {
+    if (wishlists.length > 0) {
+      // Navigue vers l'ajout de vœu, en ciblant potentiellement la première liste
+      navigation.navigate('AddWish', { wishlistId: wishlists[0].id });
+    } else {
+      toast.info("Créez d'abord une liste de souhaits");
+      setShowCreateModal(true); // Ouvre la modale de création de liste
+    }
+  }, [wishlists, navigation]);
+
+  // Handler pour voir un vœu (depuis la bottom sheet)
+  const handleWishPress = useCallback((itemId: string) => {
+    navigation.navigate('ProductDetail', { productId: itemId });
+  }, [navigation]);
+
+   // Handler pour créer une liste (depuis la bottom sheet)
+   const handleCreateWishlistFromSheet = useCallback(() => {
+     setShowCreateModal(true);
+   }, []);
+
+  // Handler pour voir une liste (depuis la bottom sheet)
+  const handleWishlistPress = useCallback((wishlistId: string) => {
+    navigation.navigate('WishlistDetail', { wishlistId });
+  }, [navigation]);
+
+  // Handler pour basculer favori (depuis la bottom sheet)
+  const handleToggleFavorite = useCallback(async (item: WishItemType) => {
+    try {
+      await editWishItem(item.id, { isFavorite: !item.isFavorite });
+      toast.success(item.isFavorite ? 'Retiré des favoris' : 'Ajouté aux favoris');
+      // Pas besoin de refresh manuel si le contexte se met à jour correctement
+    } catch (error) {
+      console.error('Erreur lors du changement de statut favori:', error);
+      toast.error('Impossible de modifier le statut favori');
+    }
+  }, [editWishItem]); // Dépendance
+
+  // Handler pour supprimer un vœu (potentiellement depuis la bottom sheet si on ajoute le bouton)
+  const handleDeleteWish = useCallback(async (itemId: string) => {
+    try {
+      await removeWishItem(itemId);
+      toast.success('Vœu supprimé avec succès');
+      // Pas besoin de refresh manuel si le contexte se met à jour correctement
+    } catch (error) {
+      console.error('Erreur lors de la suppression du vœu:', error);
+      toast.error('Impossible de supprimer le vœu');
+    }
+  }, [removeWishItem]);
+
+  // Handler pour le nouveau bouton Transactions
+  const handleTransactionsPress = useCallback(() => {
+    // TODO: Naviguer vers l'écran des transactions
+    console.log("Navigation vers l'écran des transactions");
+    // Exemple: navigation.navigate('TransactionHistory'); // Remplacer par le nom d'écran correct
+  }, [navigation]);
+
+  // --- Rendu du composant ---
+
+  if (!currentUser || !activeProfileLocal) {
+    // Affiche un indicateur de chargement si les données de profil ne sont pas prêtes
+    // Ou une vue vide/d'erreur si nécessaire
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          {/* Optionnel: Afficher un message d'erreur si error existe */}
+          {/* <ActivityIndicator size="large" color="#0000ff" /> */}
+        </View>
+        <View style={styles.bottomTabBarContainer}>
+           <BottomTabBar activeTab="profile" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
 
   return (
-    <View style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* En-tête du profil avec avatar et nom */}
-        <View style={styles.profileHeader}>
-          <TouchableOpacity
-            style={styles.avatarContainer}
-            onPress={() => setProfileSheetVisible(true)}
-          >
-            <Image
-              source={{ uri: activeProfile?.avatar || 'https://api.a0.dev/assets/image?text=User' }}
-              style={styles.avatar}
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" />
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        ref={scrollViewRef}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={['#000']}
+            tintColor={'#000'}
+            title={'Synchronisation...'}
+            titleColor={'#999'}
+          />
+        }
+        // Désactiver le scroll si la bottom sheet est complètement ouverte ?
+        // scrollEnabled={modalHeight !== MODAL_HEIGHTS.FULL}
+      >
+        {/* Header: Settings, Avatars, Name */}
+        <ProfileHeader
+          profiles={profiles}
+          selectedProfileIndex={selectedProfileIndex}
+          onSelectProfile={handleProfileClick}
+          onGoToPreviousProfile={goToPreviousProfile}
+          onGoToNextProfile={goToNextProfile}
+        />
+
+        {/* Affiche la carte de compte ou le contenu pour ajouter un compte */}
+        {activeProfileLocal.isAdd ? (
+          <View style={styles.addAccountContainer}>
+             {/* Contenu pour ajouter un compte (peut aussi devenir un composant) */}
+             <TouchableOpacity
+                style={styles.addAccountButton}
+                onPress={() => navigation.navigate('ManagedAccounts', { screen: 'ManagedAccountsList' })}
+             >
+               <Text style={styles.addAccountButtonText}>Gérer les comptes</Text>
+             </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* Account Card: Balance & Actions */}
+            <AccountCard
+              activeProfile={activeProfileLocal}
+              onRefreshBalance={handleRefresh} // Utilise le pull-to-refresh pour le moment
+              // onTransfer={() => navigation.navigate('BankTransfer')} // TODO: Vérifier les paramètres de navigation
+              onUse={() => console.log("Action: Utiliser")} // Placeholder
+              onAddMoney={handleAddMoney}
+              onTransactions={handleTransactionsPress} // Passer le nouveau handler
+              // onDetails={() => navigation.navigate('ManagedAccountProfile', { accountId: activeProfileLocal.id })}
             />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.nameContainer}
-            onPress={() => setProfileSheetVisible(true)}
-          >
-            <View style={styles.nameRow}>
-              <Text style={styles.userName}>{activeProfile?.name || 'Utilisateur'}</Text>
-            </View>
-            <View style={styles.handleRow}>
-              <Text style={styles.userHandle}>{activeProfile?.username || '@utilisateur'}</Text>
-              <TouchableOpacity style={styles.profileSwitcher} onPress={() => setProfileSheetVisible(true)}>
-                <Text style={styles.switcherText}>Changer de profil</Text>
-                <Ionicons name="chevron-down" size={16} color="#4285F4" />
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.notificationButton}>
-            <Ionicons name="notifications-outline" size={28} color="black" />
-          </TouchableOpacity>
-        </View>
 
-        {/* Boutons d'action */}
-        <View style={styles.actionButtonsContainer}>
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => navigation.navigate('Settings')}
-          >
-            <Text style={styles.actionButtonText}>Paramètres</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
-            <Text style={styles.actionButtonText}>Partager mon profil</Text>
-          </TouchableOpacity>
-        </View>
+            {/* Profile Completion Card supprimée */}
 
-        {/* Indicateur de séparation */}
-        <View style={styles.separator} />
+            {/* Transactions List (only for personal account) */}
+            <TransactionsList
+              transactions={transactionsData} // Utilise les données d'exemple
+              isPersonalAccount={activeProfileLocal.isPersonal}
+              onSeeAll={() => console.log("Action: Voir toutes les transactions")} // Placeholder
+              onTransactionPress={(id) => console.log("Action: Voir transaction", id)} // Placeholder
+            />
 
-        {/* Barre de progression du profil */}
-        {profileCompletion < 100 && (
-          <TouchableOpacity 
-            style={[
-              styles.profileCompletionContainer, 
-              { backgroundColor: progressBackgroundColor() }
-            ]}
-          >
-            <View style={styles.profileCompletionHeader}>
-              <Text style={styles.profileCompletionText}>
-                Profil complété à {profileCompletion} %
-              </Text>
-              <Ionicons 
-                name={profileCompletion < 100 ? "chevron-down" : "chevron-up"} 
-                size={20} 
-                color="black" 
-              />
-            </View>
-            <View style={styles.progressBarBackground}>
-              <View 
-                style={[
-                  styles.progressBarFill, 
-                  { 
-                    width: `${profileCompletion}%`,
-                    backgroundColor: progressColor()
-                  }
-                ]} 
-              />
-            </View>
-            <View style={styles.checklistContainer}>
-              <View style={styles.checklistItem}>
-                <View style={[styles.checkCircle, { backgroundColor: profileCompletion >= 25 ? progressColor() : '#F0F0F0' }]}>
-                  {profileCompletion >= 25 && <Ionicons name="checkmark" size={14} color="white" />}
-                </View>
-                <Text style={styles.checklistText}>Créer un profil gratuit</Text>
-              </View>
-              <View style={styles.checklistItem}>
-                <View style={[styles.checkCircle, { backgroundColor: profileCompletion >= 50 ? progressColor() : '#F0F0F0' }]}>
-                  {profileCompletion >= 50 && <Ionicons name="checkmark" size={14} color="white" />}
-                </View>
-                <Text style={styles.checklistText}>Activer double authentification</Text>
-              </View>
-              <View style={styles.checklistItem}>
-                <View style={[styles.checkCircle, { backgroundColor: profileCompletion >= 75 ? progressColor() : '#F0F0F0' }]}>
-                  {profileCompletion >= 75 && <Ionicons name="checkmark" size={14} color="white" />}
-                </View>
-                <Text style={styles.checklistText}>Ajouter un premier vœu</Text>
-              </View>
-              <View style={styles.checklistItem}>
-                <View style={[styles.checkCircle, { backgroundColor: profileCompletion >= 100 ? progressColor() : '#F0F0F0' }]}>
-                  {profileCompletion >= 100 && <Ionicons name="checkmark" size={14} color="white" />}
-                </View>
-                <Text style={styles.checklistText}>Inviter mes amis & famille</Text>
-                {profileCompletion < 100 && <Ionicons name="chevron-forward" size={16} color="#888" />}
-              </View>
-            </View>
-          </TouchableOpacity>
+            {/* Espacement pour permettre au contenu de la bottom sheet de ne pas masquer les transactions */}
+            <View style={{ height: height * 0.3 }} />
+          </>
         )}
 
-        {/* Section Gold */}
-        <View style={styles.goldContainer}>
-          <View style={styles.goldIconContainer}>
-            <Image 
-              source={{ uri: 'https://api.a0.dev/assets/image?text=G&background=gold&foreground=white' }} 
-              style={styles.goldIcon} 
-            />
-          </View>
-          <View style={styles.goldInfoContainer}>
-            <Text style={styles.goldPoints}>1050 gold</Text>
-            <Text style={styles.goldDescription}>
-              Récupère de l'argent sur tes achats depuis l'application Genie
-            </Text>
-          </View>
-        </View>
-
-        {/* Carte Virtuelle */}
-        <View style={styles.cardContainer}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>CARTE VIRTUELLE GENIE</Text>
-            <Text style={styles.cardBalance}>{activeProfile?.balance || 0} €</Text>
-          </View>
-          <Text style={styles.cardNumber}>•••• •••• •••• 3040</Text>
-          <Text style={styles.cardExpiry}>••/••</Text>
-          
-          <View style={styles.cardButtonsContainer}>
-            <TouchableOpacity
-              style={styles.cardButton}
-              onPress={() => navigation.navigate('ChooseAmount', { isAddingFunds: true })}
-            >
-              <Ionicons name="add" size={22} color="white" />
-              <Text style={styles.cardButtonText}>Ajouter</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.cardButtonOutline}
-              onPress={() => setModalVisible(true)}
-            >
-              <Ionicons name="arrow-up" size={20} color="black" />
-              <Text style={styles.cardButtonOutlineText}>Envoyer</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.cardEyeButton}>
-              <Ionicons name={cardView === 'front' ? "eye-off" : "eye"} size={24} color="#888" />
-            </TouchableOpacity>
-          </View>
-        </View>
-        
-        {/* Recevoir une carte physique */}
-        <TouchableOpacity style={styles.physicalCardButton}>
-          <Text style={styles.physicalCardText}>Recevoir une carte physique</Text>
-          <Ionicons name="chevron-forward" size={20} color="#888" />
-        </TouchableOpacity>
-
-        {/* Mes transactions */}
-        <View style={styles.transactionsContainer}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Mes transactions</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAllText}>voir tout</Text>
-            </TouchableOpacity>
-          </View>
-          
-          {/* Transactions individuelles */}
-          <TouchableOpacity style={styles.transactionItem}>
-            <View style={styles.transactionAvatar}>
-              <Image 
-                source={{ uri: 'https://api.a0.dev/assets/image?text=A&background=pink' }} 
-                style={styles.transactionAvatarImage} 
-              />
-            </View>
-            <View style={styles.transactionDetails}>
-              <Text style={styles.transactionName}>Audriana Toulet</Text>
-            </View>
-            <View style={styles.transactionAmount}>
-              <Text style={styles.transactionNegative}>-4 €</Text>
-              <Ionicons name="chevron-forward" size={16} color="#888" />
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.transactionItem}>
-            <View style={styles.transactionAvatar}>
-              <Image 
-                source={{ uri: 'https://api.a0.dev/assets/image?text=P&background=orange' }} 
-                style={styles.transactionAvatarImage} 
-              />
-            </View>
-            <View style={styles.transactionDetails}>
-              <Text style={styles.transactionName}>Paul Marceau</Text>
-            </View>
-            <View style={styles.transactionAmount}>
-              <Text style={styles.transactionPositive}>+25 €</Text>
-              <Ionicons name="chevron-forward" size={16} color="#888" />
-            </View>
-          </TouchableOpacity>
-        </View>
-
-                {/* Mon compte principal */}
-                {currentUser && activeProfile?.id !== currentUser.id && (
-                  <View style={styles.mainAccountContainer}>
-                    <Text style={styles.sectionTitle}>Mon compte principal</Text>
-                    
-                    <TouchableOpacity
-                      key={currentUser.id}
-                      style={styles.managedAccountItem}
-                      onPress={() => handleProfileSelect(currentUser.id)}
-                    >
-                      <Image
-                        source={{ uri: currentUser.avatar }}
-                        style={styles.managedAccountAvatar}
-                      />
-                      <View style={styles.managedAccountDetails}>
-                        <Text style={styles.managedAccountName}>{currentUser.name}</Text>
-                        <Text style={styles.managedAccountUsername}>{currentUser.username}</Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={20} color="#888" />
-                    </TouchableOpacity>
-                  </View>
-                )}
-        
-                {/* Mes comptes gérés */}
-                <View style={styles.managedAccountsContainer}>
-                  <Text style={styles.sectionTitle}>Mes comptes gérés</Text>
-                  
-                  {/* Affiche les comptes gérés (en excluant le compte actif) */}
-                  {managedAccounts
-                    .filter(account => account.id !== activeProfile?.id)
-                    .map((account) => (
-                      <TouchableOpacity
-                        key={account.id}
-                        style={styles.managedAccountItem}
-                        onPress={() => handleProfileSelect(account.id)}
-                      >
-                        <Image
-                          source={{ uri: account.avatar }}
-                          style={styles.managedAccountAvatar}
-                        />
-                        <View style={styles.managedAccountDetails}>
-                          <Text style={styles.managedAccountName}>{account.name}</Text>
-                          <Text style={styles.managedAccountUsername}>{account.username}</Text>
-                        </View>
-                        <Ionicons name="chevron-forward" size={20} color="#888" />
-                      </TouchableOpacity>
-                    ))}
-                  
-                  {/* Bouton pour créer un nouveau compte géré */}
-                  <TouchableOpacity
-                    style={styles.addNewAccountButton}
-                    onPress={() => navigation.navigate('ManagedAccountsList')}
-                  >
-                    <View style={styles.addNewAccountIcon}>
-                      <Ionicons name="add" size={28} color="#888" />
-                    </View>
-                    <Text style={styles.addNewAccountText}>Créer un compte géré</Text>
-                    <Ionicons name="chevron-forward" size={20} color="#888" />
-                  </TouchableOpacity>
-                </View>
-
-        {/* Espace en bas pour éviter que le contenu soit caché par la barre de navigation */}
-        <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Modal pour envoyer de l'argent */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
+      {/* Bottom Sheet */}
+      <Animated.View
+        style={[
+          styles.bottomSheetContainer,
+          { height: modalHeightAnim }
+        ]}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Envoyer de l'argent</Text>
-              <TouchableOpacity style={styles.closeButton} onPress={() => setModalVisible(false)}>
-                <Ionicons name="close" size={24} color="black" />
-              </TouchableOpacity>
-            </View>
-            
-            <TouchableOpacity style={styles.modalOption} onPress={handleUserSelection}>
-              <View style={styles.modalIconContainer}>
-                <Ionicons name="person-outline" size={24} color="#4285F4" />
-              </View>
-              <Text style={styles.modalOptionText}>Un utilisateur</Text>
-              <Ionicons name="chevron-forward" size={24} color="#999" />
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.modalOption} onPress={handleEventSelection}>
-              <View style={styles.modalIconContainer}>
-                <Ionicons name="gift-outline" size={24} color="#4285F4" />
-              </View>
-              <Text style={styles.modalOptionText}>Un événement</Text>
-              <Ionicons name="chevron-forward" size={24} color="#999" />
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.modalOption} onPress={handleBankAccountSelection}>
-              <View style={styles.modalIconContainer}>
-                <Ionicons name="business-outline" size={24} color="#4285F4" />
-              </View>
-              <Text style={styles.modalOptionText}>Un compte bancaire</Text>
-              <Ionicons name="chevron-forward" size={24} color="#999" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-      
-      <BottomTabBar activeTab="profile" />
-      
-      {/* Profile Bottom Sheet */}
-      <ProfileBottomSheet
-        visible={profileSheetVisible}
-        onClose={() => setProfileSheetVisible(false)}
-        currentProfile={currentUser || {
-          id: '1',
-          name: 'Utilisateur',
-          username: '@utilisateur',
-          avatar: 'https://api.a0.dev/assets/image?text=User',
-          balance: 0
-        }}
-        activeProfile={activeProfile || {
-          id: '1',
-          name: 'Utilisateur',
-          username: '@utilisateur',
-          avatar: 'https://api.a0.dev/assets/image?text=User',
-          balance: 0
-        }}
-        managedAccounts={managedAccounts}
-        onSelectProfile={handleProfileSelect}
+        <TouchableOpacity
+          style={styles.bottomSheetHandle}
+          onPress={handleModalPress}
+          activeOpacity={0.7}
+        >
+          <Ionicons name={getChevronIcon()} size={24} color="#999" style={styles.handleIcon} />
+        </TouchableOpacity>
+
+        {/* Contenu scrollable de la Bottom Sheet */}
+        <ProfileBottomSheetContent
+           ref={modalScrollViewRef} // Passe la ref
+           activeProfile={activeProfileLocal} // Passe seulement les infos nécessaires
+           lowBalanceWarningDismissed={lowBalanceWarningDismissed}
+           wishlistInviteData={wishlistInviteData} // Pour la carte statique
+           invitations={invitations} // Données dynamiques du contexte
+           wishlists={wishlists} // Données dynamiques du contexte
+           wishItems={wishItems} // Données dynamiques du contexte
+           isLoading={isLoading}
+           error={error}
+           onDismissLowBalanceWarning={handleDismissLowBalanceWarning}
+           onAddMoney={handleAddMoney}
+           onAcceptStaticInvite={handleAcceptWishlistInvite}
+           onDeclineStaticInvite={handleDeclineWishlistInvite}
+           onAcceptInvitation={handleAcceptInvitation}
+           onRejectInvitation={handleRejectInvitation}
+           // onSeeAllWishes={() => {}} // Placeholder si besoin
+           onAddWish={handleAddWish}
+           onWishPress={handleWishPress}
+           // onSeeAllWishlists={() => {}} // Placeholder si besoin
+           onCreateWishlist={handleCreateWishlistFromSheet}
+           onWishlistPress={handleWishlistPress}
+           onRetryLoad={handleRefresh} // Utilise le refresh global pour réessayer
+           onToggleFavoriteWish={handleToggleFavorite} // Passe la fonction
+        />
+      </Animated.View>
+
+      {/* Barre de navigation en bas */}
+      <View style={styles.bottomTabBarContainer}>
+        <BottomTabBar activeTab="profile" />
+      </View>
+
+      {/* Modales globales */}
+      <WishlistInviteModal
+        visible={wishlistInviteVisible}
+        onClose={() => setWishlistInviteVisible(false)}
+        onAccept={handleAcceptWishlistInvite}
+        onDecline={handleDeclineWishlistInvite}
+        wishlistData={wishlistInviteData}
       />
-    </View>
+      <CreateWishlistModal
+        visible={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreateWishlist={handleCreateWishlist} // Passe la fonction de navigation/préparation
+      />
+
+    </SafeAreaView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFF',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  /* Styles pour les comptes gérés */
-  managedAccountItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  managedAccountAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginRight: 15,
-  },
-  managedAccountDetails: {
-    flex: 1,
-  },
-  managedAccountName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  managedAccountUsername: {
-    fontSize: 14,
-    color: '#888',
-  },
-  profileHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 60 : 20,
-    paddingBottom: 20,
-    backgroundColor: '#FFF',
-  },
-  avatarContainer: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    overflow: 'hidden',
-    backgroundColor: '#F0F0F0',
-  },
-  avatar: {
-    width: '100%',
-    height: '100%',
-  },
-  nameContainer: {
-    flex: 1,
-    marginLeft: 15,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  userName: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#000',
-  },
-  handleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 3,
-  },
-  userHandle: {
-    fontSize: 18,
-    color: '#888',
-  },
-  profileSwitcher: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  switcherText: {
-    fontSize: 14,
-    color: '#4285F4',
-    marginRight: 2,
-  },
-  notificationButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F5F5F5',
-  },
-  actionButtonsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
-  actionButton: {
-    backgroundColor: '#F5F5F5',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderRadius: 20,
-    marginRight: 10,
-  },
-  actionButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#333',
-  },
-  separator: {
-    height: 10,
-    backgroundColor: '#F5F5F5',
-    marginBottom: 20,
-  },
-  profileCompletionContainer: {
-    marginHorizontal: 20,
-    marginBottom: 20,
-    padding: 20,
-    borderRadius: 15,
-  },
-  profileCompletionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  profileCompletionText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  progressBarBackground: {
-    width: '100%',
-    height: 8,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 4,
-    marginBottom: 15,
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  checklistContainer: {
-    marginTop: 10,
-  },
-  checklistItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  checkCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-  },
-  checklistText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#333',
-  },
-  goldContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFCF2',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    padding: 15,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: '#FFE7B3',
-  },
-  goldIconContainer: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#FFDF80',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 15,
-  },
-  goldIcon: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 25,
-  },
-  goldInfoContainer: {
-    flex: 1,
-  },
-  goldPoints: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#D4AF37',
-    marginBottom: 5,
-  },
-  goldDescription: {
-    fontSize: 14,
-    color: '#666',
-  },
-  cardContainer: {
-    backgroundColor: '#F8F8F8',
-    marginHorizontal: 20,
-    marginBottom: 15,
-    padding: 20,
-    borderRadius: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  cardTitle: {
-    fontSize: 14,
-    color: '#777',
-  },
-  cardBalance: {
-    fontSize: 22,
-    fontWeight: 'bold',
-  },
-  cardNumber: {
-    fontSize: 16,
-    marginBottom: 5,
-  },
-  cardExpiry: {
-    fontSize: 14,
-    color: '#777',
-    marginBottom: 20,
-  },
-  cardButtonsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  cardButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'black',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderRadius: 25,
-    marginRight: 10,
-  },
-  cardButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '500',
-    marginLeft: 5,
-  },
-  cardButtonOutline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#DDD',
-    backgroundColor: 'white',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderRadius: 25,
-    marginRight: 10,
-  },
-  cardButtonOutlineText: {
-    color: 'black',
-    fontSize: 16,
-    fontWeight: '500',
-    marginLeft: 5,
-  },
-  cardEyeButton: {
-    marginLeft: 'auto',
-    padding: 10,
-  },
-  physicalCardButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'white',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    padding: 15,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: '#EEE',
-  },
-  physicalCardText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  transactionsContainer: {
-    marginHorizontal: 20,
-    marginBottom: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  seeAllText: {
-    fontSize: 14,
-    color: '#4285F4',
-  },
-  transactionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    padding: 15,
-    borderRadius: 15,
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  transactionAvatar: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    backgroundColor: '#F0F0F0',
-    overflow: 'hidden',
-    marginRight: 15,
-  },
-  transactionAvatarImage: {
-    width: '100%',
-    height: '100%',
-  },
-  transactionDetails: {
-    flex: 1,
-  },
-  transactionName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  transactionAmount: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  transactionPositive: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#4CD964',
-    marginRight: 5,
-  },
-  transactionNegative: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FF3B30',
-    marginRight: 5,
-  },
-  // Style pour le modal d'envoi
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  modalContent: {
-    backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    paddingBottom: 15,
-    marginBottom: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-    position: 'relative',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  closeButton: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  modalOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
-    marginBottom: 10,
-    backgroundColor: '#F8F8F8',
-    borderRadius: 10,
-  },
-  modalIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E8F1FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 15,
-  },
-  modalOptionText: {
-    fontSize: 16,
-    flex: 1,
-  },
-  mainAccountContainer: {
-    marginHorizontal: 20,
-    marginBottom: 20,
-  },
-  managedAccountsContainer: {
-    marginHorizontal: 20,
-    marginBottom: 20,
-  },
-  addNewAccountButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    borderStyle: 'dashed',
-    borderWidth: 1,
-    borderColor: '#CCC',
-  },
-  addNewAccountIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#F5F5F5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 15,
-  },
-  addNewAccountText: {
-    fontSize: 16,
-    flex: 1,
-  },
-});
 
 export default ProfileScreen;

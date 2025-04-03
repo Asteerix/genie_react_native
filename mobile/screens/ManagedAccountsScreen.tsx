@@ -8,13 +8,14 @@ import {
   SafeAreaView,
   Dimensions,
   Platform,
-  StatusBar
+  StatusBar,
+  Alert // Ajouter Alert
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../types/navigation';
+import { RootStackParamList, ManagedAccountsStackParamList } from '../types/navigation'; // Importer ManagedAccountsStackParamList si ce n'est pas déjà fait implicitement
 import { Feather } from '@expo/vector-icons';
-
+import { useAuth } from '../auth/context/AuthContext'; // Importer useAuth
 // Get screen dimensions
 const { width, height } = Dimensions.get('window');
 
@@ -22,6 +23,7 @@ type ManagedAccountsScreenNavigationProp = NativeStackNavigationProp<RootStackPa
 
 const ManagedAccountsScreen: React.FC = () => {
   const navigation = useNavigation<ManagedAccountsScreenNavigationProp>();
+  const { user } = useAuth(); // Récupérer l'utilisateur connecté
   const [options, setOptions] = useState({
     children: true,
     elderly: true,
@@ -29,18 +31,34 @@ const ManagedAccountsScreen: React.FC = () => {
   });
 
   const handleClose = () => {
-    navigation.reset({
-      index: 0,
-      routes: [{ name: 'AddWish' }],
-    });
+    // Revenir à l'écran précédent dans la pile de navigation
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      // Fallback au cas où il n'y a pas d'écran précédent (peu probable ici mais sécuritaire)
+      // Peut-être naviguer vers un écran par défaut comme le profil ou l'accueil
+      console.warn("Impossible de revenir en arrière depuis ManagedAccountsScreen.");
+      // navigation.navigate('Profile'); // Exemple de fallback si nécessaire
+    }
   };
 
   const handleSkip = () => {
-    navigation.navigate('ManagedAccountsList');
+    // Naviguer vers l'écran 'ManagedAccountsList' DANS la pile 'ManagedAccounts'
+    navigation.navigate('ManagedAccounts', { screen: 'ManagedAccountsList' });
   };
 
   const handleCreateManagedAccount = () => {
-    navigation.navigate('ManagedAccountName');
+    if (!user?.id) {
+      console.error("ID utilisateur non trouvé, impossible de créer un compte géré.");
+      // Afficher une alerte ou gérer l'erreur autrement
+      Alert.alert("Erreur", "Impossible de récupérer votre identifiant utilisateur.");
+      return;
+    }
+    // Naviguer vers l'écran 'ManagedAccountName' DANS la pile 'ManagedAccounts' en passant l'ID du gestionnaire
+    navigation.navigate('ManagedAccounts', {
+      screen: 'ManagedAccountName',
+      params: { managedBy: user.id } // Fournir le paramètre requis
+    });
   };
 
   // Calculate sizes based on screen height
@@ -64,6 +82,7 @@ const ManagedAccountsScreen: React.FC = () => {
         {/* En-tête */}
         <View style={[styles.header, { height: headerHeight }]}>
           <TouchableOpacity
+            key="close-button"
             style={styles.closeButton}
             onPress={handleClose}
             hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
@@ -71,6 +90,7 @@ const ManagedAccountsScreen: React.FC = () => {
             <Feather name="x" size={iconSize} color="black" />
           </TouchableOpacity>
           <TouchableOpacity
+            key="help-button"
             style={styles.helpButton}
             hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
           >
@@ -104,6 +124,7 @@ const ManagedAccountsScreen: React.FC = () => {
         {/* Options avec checkboxes */}
         <View style={[styles.optionsContainer, { height: optionsHeight }]}>
           <TouchableOpacity 
+            key="children-option"
             style={styles.optionRow}
             onPress={() => setOptions({...options, children: !options.children})}
           >
@@ -116,6 +137,7 @@ const ManagedAccountsScreen: React.FC = () => {
           </TouchableOpacity>
 
           <TouchableOpacity 
+            key="elderly-option"
             style={styles.optionRow}
             onPress={() => setOptions({...options, elderly: !options.elderly})}
           >
@@ -128,6 +150,7 @@ const ManagedAccountsScreen: React.FC = () => {
           </TouchableOpacity>
 
           <TouchableOpacity 
+            key="others-option"
             style={styles.optionRow}
             onPress={() => setOptions({...options, others: !options.others})}
           >
@@ -143,6 +166,7 @@ const ManagedAccountsScreen: React.FC = () => {
         {/* Boutons d'action */}
         <View style={[styles.actionsContainer, { height: actionsHeight }]}>
           <TouchableOpacity 
+            key="create-button"
             style={[styles.createButton, { paddingVertical: height * 0.015 }]}
             onPress={handleCreateManagedAccount}
           >
@@ -150,6 +174,7 @@ const ManagedAccountsScreen: React.FC = () => {
           </TouchableOpacity>
 
           <TouchableOpacity 
+            key="skip-button"
             style={[styles.skipButton, { paddingVertical: height * 0.015 }]}
             onPress={handleSkip}
           >

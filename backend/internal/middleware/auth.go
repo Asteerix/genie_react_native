@@ -2,11 +2,13 @@ package middleware
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/asteerix/auth-backend/internal/config"
+	"genie/internal/config"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog/log"
@@ -85,22 +87,51 @@ func (s *JWTService) GenerateRefreshToken(userID string) (string, error) {
 
 // VerifyAccessToken vérifie la validité d'un token d'accès
 func (s *JWTService) VerifyAccessToken(tokenString string) (*JWTClaims, error) {
+	// Ajouter une marge pour la validation 'nbf' (Not Before) et 'exp' (Expires At)
+	leeway := time.Second * 2
+	log.Debug().Str("token", tokenString[:10]+"...").Msg(">>> VerifyAccessToken: Début de la vérification") // Log début avec juste le début du token pour sécurité
+
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+		// Vérifier la méthode de signature
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("méthode de signature inattendue")
+			log.Error().Str("alg", fmt.Sprintf("%v", token.Header["alg"])).Msg("!!! VerifyAccessToken: Méthode de signature inattendue")
+			return nil, fmt.Errorf("méthode de signature inattendue: %v", token.Header["alg"])
 		}
+		// Retourner la clé secrète
+		log.Debug().Msg(">>> VerifyAccessToken: Utilisation de AccessSecret pour la vérification")
 		return []byte(s.config.AccessSecret), nil
-	})
+	}, jwt.WithLeeway(leeway), jwt.WithIssuer(s.config.Issuer)) // Ajouter la validation de l'issuer
+
+	// Log après ParseWithClaims, avant la vérification de l'erreur
+	log.Debug().Msg(">>> VerifyAccessToken: Après jwt.ParseWithClaims")
 
 	if err != nil {
-		return nil, err
+		// Log détaillé de l'erreur de parsing/validation JWT
+		// Utiliser .Err(err) pour inclure l'erreur spécifique
+		log.Error().Err(err).Msg("!!! VerifyAccessToken: jwt.ParseWithClaims a échoué")
+		// Essayer de déterminer la nature de l'erreur
+		if errors.Is(err, jwt.ErrTokenMalformed) {
+			log.Error().Msg("!!! VerifyAccessToken: Erreur - Token malformé")
+		} else if errors.Is(err, jwt.ErrTokenSignatureInvalid) {
+			log.Error().Msg("!!! VerifyAccessToken: Erreur - Signature invalide")
+		} else if errors.Is(err, jwt.ErrTokenExpired) || errors.Is(err, jwt.ErrTokenNotValidYet) {
+			log.Warn().Msg("!!! VerifyAccessToken: Erreur - Token expiré ou pas encore valide")
+		} else {
+			log.Error().Msg("!!! VerifyAccessToken: Erreur inconnue lors du parsing/validation")
+		}
+		return nil, err // Retourner l'erreur originale
 	}
 
+	// Vérifier si les claims sont corrects et si le token est valide
 	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
+		log.Debug().Str("userID", claims.UserID).Msg(">>> VerifyAccessToken: Token valide et claims OK")
 		return claims, nil
 	}
 
-	return nil, errors.New("token JWT invalide")
+	// Si on arrive ici, le token a été parsé mais token.Valid est false ou les claims ne sont pas du bon type
+	claims, _ := token.Claims.(*JWTClaims) // Essayer de récupérer les claims même si invalide pour le log
+	log.Error().Bool("token.Valid", token.Valid).Interface("claims", claims).Msg("!!! VerifyAccessToken: Token parsé mais invalide (token.Valid=false ou claims incorrects)")
+	return nil, errors.New("token JWT invalide (parsed but not valid)")
 }
 
 // VerifyRefreshToken vérifie la validité d'un token de rafraîchissement
@@ -129,41 +160,83 @@ func AuthRequired() gin.HandlerFunc {
 		// Récupérer le service JWT et la configuration
 		jwtService, exists := c.Get("jwtService")
 		if !exists {
+			log.Error().Msg("AuthRequired: Service JWT non trouvé dans le contexte")
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Service JWT non configuré"})
 			return
 		}
 
 		service, ok := jwtService.(*JWTService)
 		if !ok {
+			log.Error().Msg("AuthRequired: Service JWT invalide dans le contexte")
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Service JWT invalide"})
 			return
 		}
 
-		// Extraire le token du header Authorization
+		var tokenString string
+
+		// Vérifier d'abord le header Authorization
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Header d'autorisation manquant"})
-			return
+		if authHeader != "" {
+			parts := strings.Split(authHeader, " ")
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenString = parts[1]
+				log.Debug().Msg(">>> AuthRequired: Token extrait du header Authorization")
+			} else {
+				log.Warn().Str("header", authHeader).Msg("AuthRequired: Format d'autorisation invalide")
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Format d'autorisation invalide"})
+				return
+			}
+		} else {
+			// Si pas de header ET c'est une requête WebSocket (Upgrade), vérifier le query param "token"
+			isWebSocket := c.GetHeader("Upgrade") == "websocket" && c.GetHeader("Connection") == "Upgrade"
+			if isWebSocket {
+				tokenString = c.Query("token")
+				if tokenString != "" {
+					log.Debug().Msg(">>> AuthRequired: Token extrait du query param 'token' pour WebSocket")
+				} else {
+					log.Warn().Msg("AuthRequired: Token manquant pour la connexion WebSocket (ni header, ni query param)")
+					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Token d'authentification WebSocket manquant"})
+					return
+				}
+			} else {
+				// Si ce n'est pas une requête WebSocket et qu'il n'y a pas de header, refuser
+				log.Warn().Msg("AuthRequired: Header d'autorisation manquant (non-WebSocket)")
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Header d'autorisation manquant"})
+				return
+			}
 		}
-
-		// Le format doit être "Bearer <token>"
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Format d'autorisation invalide"})
-			return
-		}
-
-		tokenString := parts[1]
 
 		// Vérifier le token
+		log.Debug().Msg(">>> AuthRequired: Appel de VerifyAccessToken") // Log juste avant l'appel
 		claims, err := service.VerifyAccessToken(tokenString)
+		// Log après la vérification pour voir si on arrive ici
+		log.Debug().Msg(">>> AuthRequired: Retour de VerifyAccessToken")
 		if err != nil {
-			log.Debug().Err(err).Msg("Token d'accès invalide")
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Non autorisé"})
+			// Le log détaillé est maintenant DANS VerifyAccessToken, on garde un log WARN ici
+			// Utiliser .Err(err) pour inclure l'erreur spécifique
+			log.Warn().Err(err).Msg("AuthRequired: Échec de la vérification du token d'accès")
+			// Ajouter le détail de l'erreur JWT spécifique
+			errMsg := "Token invalide ou expiré"
+
+			// Vérifier les types d'erreurs JWT connus
+			if errors.Is(err, jwt.ErrTokenMalformed) {
+				errMsg = "Token JWT malformé"
+			} else if errors.Is(err, jwt.ErrTokenSignatureInvalid) {
+				errMsg = "Signature du token JWT invalide"
+			} else if errors.Is(err, jwt.ErrTokenExpired) {
+				errMsg = "Token JWT expiré"
+			} else if errors.Is(err, jwt.ErrTokenNotValidYet) {
+				errMsg = "Token JWT pas encore valide"
+			} else {
+				// Utiliser le message d'erreur original pour les autres cas
+				errMsg = fmt.Sprintf("Erreur de vérification du token: %v", err.Error())
+			}
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Non autorisé", "details": errMsg})
 			return
 		}
 
 		// Stocker l'ID de l'utilisateur dans le contexte
+		log.Debug().Str("userID", claims.UserID).Msg(">>> AuthRequired: Authentification réussie, userID ajouté au contexte")
 		c.Set(UserIDKey, claims.UserID)
 
 		// Continuer l'exécution
@@ -220,8 +293,8 @@ func Optional() gin.HandlerFunc {
 }
 
 // SetJWTService est un middleware qui initialise le service JWT
-func SetJWTService(jwtConfig config.JWTConfig) gin.HandlerFunc {
-	jwtService := NewJWTService(jwtConfig)
+// SetJWTService est un middleware qui injecte une instance existante du service JWT dans le contexte
+func SetJWTService(jwtService *JWTService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set("jwtService", jwtService)
 		c.Next()
@@ -262,4 +335,19 @@ func LoggingMiddleware() gin.HandlerFunc {
 // AuthMiddleware retourne un middleware d'authentification
 func AuthMiddleware(authService interface{}) gin.HandlerFunc {
 	return AuthRequired()
+}
+
+// GetUserIDFromContext récupère l'ID de l'utilisateur depuis le contexte Gin
+func GetUserIDFromContext(c *gin.Context) string {
+	userID, exists := c.Get(UserIDKey)
+	if !exists {
+		return ""
+	}
+
+	userIDStr, ok := userID.(string)
+	if !ok {
+		return ""
+	}
+
+	return userIDStr
 }

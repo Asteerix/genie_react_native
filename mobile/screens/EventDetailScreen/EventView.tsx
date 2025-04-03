@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { EventViewProps, EventDetails, Gift, Host } from './types';
+import { format, differenceInDays, isToday, isTomorrow, isPast, isWithinInterval, startOfDay, parseISO, isValid as isDateValid } from 'date-fns'; // Importer les fonctions date-fns
+import { fr } from 'date-fns/locale'; // Importer la locale fr
 import { formatEventTime, formatEventDate, formatFullAddress, copyToClipboard } from './utils';
 
 const EventView: React.FC<EventViewProps> = ({
@@ -51,6 +53,73 @@ const EventView: React.FC<EventViewProps> = ({
   console.log('FORCING Is Wedding:', isWedding);
   console.log('FORCING Is Birthday:', isBirthday);
 
+  // Fonction pour obtenir la chaîne de date dynamique
+  const getDynamicDateString = (details: EventDetails): string => {
+    // Essayer de reconstruire startDate à partir de time
+    // Note: Ceci suppose que time.year, time.month (numérique?), time.day existent et sont valides.
+    // Il faudrait idéalement avoir startDate/endDate ISO dans les types.
+    let startDate: Date | null = null;
+    let endDate: Date | null = null; // Pour la logique "En cours" future
+
+    try {
+      // Attention: time.month est une chaîne ("Décembre"), il faut la convertir
+      // On utilise la date formatée existante 'date' (ex: "09/12/2024") pour parser
+      const parsedStartDate = parseISO(details.date); // Tentative directe si date est ISO
+      if (isDateValid(parsedStartDate)) {
+          startDate = parsedStartDate;
+      } else {
+          // Fallback: essayer de parser le format JJ/MM/AAAA
+          const parts = details.date.split('/');
+          if (parts.length === 3) {
+              const day = parseInt(parts[0], 10);
+              const month = parseInt(parts[1], 10) - 1; // Mois est 0-indexé
+              const year = parseInt(parts[2], 10);
+              const reconstructedDate = new Date(year, month, day);
+              if (isDateValid(reconstructedDate)) {
+                  startDate = reconstructedDate;
+              }
+          }
+      }
+
+      // TODO: Ajouter la logique pour reconstruire endDate si elle est ajoutée aux types
+
+    } catch (error) {
+      console.error("Error reconstructing start date:", error);
+      return details.date; // Fallback à la date brute
+    }
+
+    if (!startDate || !isDateValid(startDate)) {
+        console.warn("Could not reconstruct a valid start date from:", details.date, details.time);
+        return details.date; // Fallback si la reconstruction échoue
+    }
+
+    const now = new Date();
+
+    // Logique d'affichage dynamique
+    try {
+        // TODO: Ajouter la logique "En cours" quand endDate sera disponible
+        // if (endDate && isDateValid(endDate) && isWithinInterval(now, { start: startDate, end: endDate })) {
+        //   return 'En cours';
+        // }
+
+        if (isToday(startDate)) return "Aujourd'hui";
+        if (isTomorrow(startDate)) return "Demain";
+
+        const daysUntil = differenceInDays(startOfDay(startDate), startOfDay(now));
+        if (daysUntil > 1 && daysUntil <= 15) {
+          return `Dans ${daysUntil} jours`;
+        }
+
+        // Sinon (plus de 15 jours ou passé), afficher la date formatée
+        return format(startDate, 'dd/MM/yyyy', { locale: fr });
+
+    } catch (error) {
+        console.error("Error formatting dynamic date string:", error);
+        return format(startDate, 'dd/MM/yyyy', { locale: fr }); // Fallback au format standard
+    }
+  };
+
+
   // Rendu du composant
   return (
     <ScrollView
@@ -86,7 +155,7 @@ const EventView: React.FC<EventViewProps> = ({
           <Text style={[styles.customHeaderTitle, { fontSize: 36, marginBottom: 15 }]}>Anniversaire</Text>
           
           <View style={[styles.dateBadge, { backgroundColor: '#DEFFDB', paddingHorizontal: 20, paddingVertical: 10 }]}>
-            <Text style={[styles.dateBadgeText, { fontSize: 17 }]}>09/12/2024</Text>
+            <Text style={[styles.dateBadgeText, { fontSize: 17 }]}>{getDynamicDateString(eventDetails)}</Text>
           </View>
           
           <View style={styles.birthdayInfoContainer}>
@@ -131,12 +200,12 @@ const EventView: React.FC<EventViewProps> = ({
             <View style={styles.infoContent}>
               <Text style={styles.infoLabel}>Date</Text>
               <Text style={styles.infoText}>
-                {formatEventDate(time.day, time.month)}
+                {getDynamicDateString(eventDetails)}
               </Text>
             </View>
             <TouchableOpacity
               style={styles.copyButton}
-              onPress={() => copyToClipboard(date)}
+              onPress={() => copyToClipboard(getDynamicDateString(eventDetails))}
             >
               <MaterialIcons name="content-copy" size={20} color="#888" />
             </TouchableOpacity>

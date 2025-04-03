@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,39 +9,27 @@ import {
   TextInput,
   Image,
   ScrollView,
-  Dimensions
+  Dimensions,
+  ActivityIndicator
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, AntDesign } from '@expo/vector-icons';
+import { useWishlist } from '../context/WishlistContext';
+import { WishlistType, WishItemType } from '../api/wishlists';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../types/navigation';
 
 interface SearchModalProps {
   visible: boolean;
   onClose: () => void;
 }
 
-// Historique de recherche
+// Historique de recherche - serait idéalement persistant via AsyncStorage
 const SEARCH_HISTORY = [
   'Air force one',
-  'Cravate rouge',
-  'Lego de londres',
-  'Legos'
-];
-
-// Résultats de recherche
-const SEARCH_RESULTS = [
-  {
-    id: '1',
-    name: 'Air Force One',
-    brand: 'nike',
-    price: '159.99 €',
-    image: 'https://api.a0.dev/assets/image?text=nike%20air%20force%20one%20black%20white%20sneakers&aspect=1:1&seed=123'
-  },
-  {
-    id: '2',
-    name: 'BASKETS GUCCI RE-WEB',
-    brand: 'gucci',
-    price: '439.99 €',
-    image: 'https://api.a0.dev/assets/image?text=gucci%20shoes%20white%20leather%20sneakers&aspect=1:1&seed=456'
-  }
+  'Cadeau papa',
+  'Livre',
+  'Anniversaire'
 ];
 
 const { width } = Dimensions.get('window');
@@ -53,15 +41,67 @@ const SearchModal: React.FC<SearchModalProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [wishlistResults, setWishlistResults] = useState<WishlistType[]>([]);
+  const [itemResults, setItemResults] = useState<WishItemType[]>([]);
+  
+  const { wishlists, wishItems } = useWishlist();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  // Effectuer la recherche quand la requête change
+  useEffect(() => {
+    if (searchQuery.trim().length > 0) {
+      performSearch(searchQuery);
+    } else {
+      setWishlistResults([]);
+      setItemResults([]);
+    }
+  }, [searchQuery, wishlists, wishItems]);
+
+  // Fonction de recherche
+  const performSearch = (query: string) => {
+    setIsLoading(true);
+    
+    try {
+      const normalizedQuery = query.toLowerCase().trim();
+      
+      // Rechercher dans les listes
+      const filteredWishlists = wishlists.filter(wishlist =>
+        wishlist.title.toLowerCase().includes(normalizedQuery) ||
+        (wishlist.description && wishlist.description.toLowerCase().includes(normalizedQuery))
+      );
+      
+      // Rechercher dans les vœux
+      const filteredItems = wishItems.filter(item =>
+        item.name.toLowerCase().includes(normalizedQuery) ||
+        (item.description && item.description.toLowerCase().includes(normalizedQuery))
+      );
+      
+      setWishlistResults(filteredWishlists);
+      setItemResults(filteredItems);
+      setShowResults(true);
+    } catch (err) {
+      console.error('Erreur lors de la recherche:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleRemoveHistoryItem = (item: string) => {
-    // Dans une vraie app, supprimer de l'historique
+    // Dans une vraie app, supprimer de l'historique via AsyncStorage
     console.log('Remove from history:', item);
   };
 
-  const handleAddToWishlist = (productId: string) => {
-    // Dans une vraie app, ajouter à la wishlist
-    console.log('Add to wishlist:', productId);
+  const handleSelectItem = (item: WishItemType) => {
+    // Naviguer vers la page de détail du produit
+    onClose();
+    navigation.navigate('ProductDetail', { productId: item.id });
+  };
+  
+  const handleSelectWishlist = (wishlist: WishlistType) => {
+    // Naviguer vers la page de détail de la wishlist
+    onClose();
+    navigation.navigate('WishlistDetail', { wishlistId: wishlist.id });
   };
 
   return (
@@ -82,10 +122,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
               style={styles.searchInput}
               placeholder="Rechercher..."
               value={searchQuery}
-              onChangeText={(text) => {
-                setSearchQuery(text);
-                setShowResults(text.length > 0);
-              }}
+              onChangeText={setSearchQuery}
               placeholderTextColor="#999"
               autoFocus
             />
@@ -97,77 +134,101 @@ const SearchModal: React.FC<SearchModalProps> = ({
         </View>
 
         <ScrollView style={styles.content}>
-          {!showResults ? (
+          {isLoading && (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#000" />
+              <Text style={styles.loadingText}>Recherche en cours...</Text>
+            </View>
+          )}
+          
+          {searchQuery.length === 0 ? (
+            // Afficher l'historique de recherche si aucune recherche n'est en cours
             <>
+              <Text style={styles.sectionTitle}>Recherches récentes</Text>
               {SEARCH_HISTORY.map((item, index) => (
                 <View key={index} style={styles.historyItem}>
-                  <Text style={styles.historyText}>{item}</Text>
-                  <TouchableOpacity 
+                  <TouchableOpacity
+                    style={styles.historyItemContent}
+                    onPress={() => setSearchQuery(item)}
+                  >
+                    <AntDesign name="clockcircleo" size={18} color="#999" />
+                    <Text style={styles.historyText}>{item}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
                     onPress={() => handleRemoveHistoryItem(item)}
                     style={styles.removeButton}
                   >
-                    <Ionicons name="close" size={24} color="#999" />
+                    <Ionicons name="close" size={20} color="#999" />
                   </TouchableOpacity>
                 </View>
               ))}
-
-              <TouchableOpacity style={styles.navigatorButton}>
-                <Image 
-                  source={{ uri: 'https://api.a0.dev/assets/image?text=google%20G%20logo&aspect=1:1' }}
-                  style={styles.googleIcon}
-                />
-                <Text style={styles.navigatorText}>Changer de navigateur par défaut</Text>
-                <Ionicons name="chevron-forward" size={24} color="#666" />
-              </TouchableOpacity>
-
-              <View style={styles.resultsGrid}>
-                {SEARCH_RESULTS.map((product) => (
-                  <View key={product.id} style={styles.productCard}>
-                    <Image source={{ uri: product.image }} style={styles.productImage} />
-                    <View style={styles.productInfo}>
-                      <Text style={styles.productName}>{product.name}</Text>
-                      <View style={styles.brandContainer}>
-                        <Image 
-                          source={{ uri: `https://api.a0.dev/assets/image?text=${product.brand}%20logo&aspect=1:1` }}
-                          style={styles.brandLogo}
-                        />
-                        <Text style={styles.productPrice}>{product.price}</Text>
-                      </View>
-                    </View>
-                    <TouchableOpacity 
-                      style={styles.addButton}
-                      onPress={() => handleAddToWishlist(product.id)}
-                    >
-                      <Ionicons name="add" size={20} color="white" />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
             </>
-          ) : (
-            <View style={styles.resultsGrid}>
-              {SEARCH_RESULTS.map((product) => (
-                <View key={product.id} style={styles.productCard}>
-                  <Image source={{ uri: product.image }} style={styles.productImage} />
-                  <View style={styles.productInfo}>
-                    <Text style={styles.productName}>{product.name}</Text>
-                    <View style={styles.brandContainer}>
-                      <Image 
-                        source={{ uri: `https://api.a0.dev/assets/image?text=${product.brand}%20logo&aspect=1:1` }}
-                        style={styles.brandLogo}
-                      />
-                      <Text style={styles.productPrice}>{product.price}</Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity 
-                    style={styles.addButton}
-                    onPress={() => handleAddToWishlist(product.id)}
-                  >
-                    <Ionicons name="add" size={20} color="white" />
-                  </TouchableOpacity>
+          ) : !isLoading && (
+            // Afficher les résultats de recherche
+            <>
+              {wishlistResults.length > 0 && (
+                <View style={styles.sectionContainer}>
+                  <Text style={styles.sectionTitle}>Listes de souhaits</Text>
+                  {wishlistResults.map((wishlist) => (
+                    <TouchableOpacity
+                      key={wishlist.id}
+                      style={styles.resultItem}
+                      onPress={() => handleSelectWishlist(wishlist)}
+                    >
+                      <View style={styles.wishlistIconContainer}>
+                        <Ionicons name="list" size={24} color="#000" />
+                      </View>
+                      <View style={styles.resultItemContent}>
+                        <Text style={styles.resultItemTitle} numberOfLines={1}>
+                          {wishlist.title}
+                        </Text>
+                        {wishlist.description && (
+                          <Text style={styles.resultItemDescription} numberOfLines={1}>
+                            {wishlist.description}
+                          </Text>
+                        )}
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color="#999" />
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              ))}
-            </View>
+              )}
+
+              {itemResults.length > 0 && (
+                <View style={styles.sectionContainer}>
+                  <Text style={styles.sectionTitle}>Vœux</Text>
+                  <View style={styles.resultsGrid}>
+                    {itemResults.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={styles.productCard}
+                        onPress={() => handleSelectItem(item)}
+                      >
+                        <Image
+                          source={{ uri: item.image || 'https://api.a0.dev/assets/image?text=no%20image&aspect=1:1' }}
+                          style={styles.productImage}
+                        />
+                        <View style={styles.productInfo}>
+                          <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
+                          <View style={styles.brandContainer}>
+                            <Text style={styles.productPrice}>{item.price || ''}</Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {wishlistResults.length === 0 && itemResults.length === 0 && (
+                <View style={styles.emptyResultsContainer}>
+                  <Ionicons name="search-outline" size={64} color="#DDD" />
+                  <Text style={styles.emptyResultsText}>
+                    Aucun résultat trouvé pour "{searchQuery}"
+                  </Text>
+                </View>
+              )}
+            </>
           )}
         </ScrollView>
       </SafeAreaView>
@@ -214,40 +275,74 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 15,
   },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 30,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#777',
+    marginTop: 10,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  sectionContainer: {
+    marginBottom: 20,
+  },
   historyItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 15,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#EEEEEE',
+  },
+  historyItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
   historyText: {
     fontSize: 16,
     color: '#000',
+    marginLeft: 10,
   },
   removeButton: {
-    padding: 5,
+    padding: 8,
   },
-  navigatorButton: {
+  resultItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 15,
-    marginVertical: 20,
-    borderWidth: 1,
-    borderColor: '#EEEEEE',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
   },
-  googleIcon: {
-    width: 24,
-    height: 24,
+  wishlistIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: 10,
   },
-  navigatorText: {
+  resultItemContent: {
     flex: 1,
+    marginRight: 10,
+  },
+  resultItemTitle: {
     fontSize: 16,
+    fontWeight: 'bold',
     color: '#000',
+  },
+  resultItemDescription: {
+    fontSize: 14,
+    color: '#777',
+    marginTop: 2,
   },
   resultsGrid: {
     flexDirection: 'row',
@@ -291,16 +386,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
   },
-  addButton: {
-    position: 'absolute',
-    bottom: 10,
-    right: 10,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#000',
-    justifyContent: 'center',
+  emptyResultsContainer: {
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  emptyResultsText: {
+    fontSize: 16,
+    color: '#777',
+    marginTop: 10,
+    textAlign: 'center',
   },
 });
 

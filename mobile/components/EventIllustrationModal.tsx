@@ -1,27 +1,36 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  Modal,
   SafeAreaView,
   ScrollView,
   Dimensions,
   Platform,
-  StatusBar,
-  FlatList
+  FlatList,
+  Animated,
+  Easing,
+  Keyboard,
+  PanResponder,
+  BackHandler,
+  Image
 } from 'react-native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { Ionicons } from '@expo/vector-icons';
+import { toast } from 'sonner-native';
+import { useEvents } from '../context/EventContext'; // Importer useEvents
+import { Event } from '../api/events';
+import { RootStackParamList } from '../types/navigation';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Interface des props
-interface EventIllustrationModalProps {
-  visible: boolean;
-  onClose: () => void;
-  onBack: () => void;
-  onContinue: (data: { id: string; backgroundColor: string; emoji: string }) => void;
-}
+// Type pour les paramètres de la route
+type EventIllustrationRouteProp = RouteProp<RootStackParamList, 'EventIllustration'>;
+
+// Type pour la navigation
+type EventIllustrationNavigationProp = StackNavigationProp<RootStackParamList>;
 
 // Interface pour catégorie d'emojis
 interface EmojiCategory {
@@ -30,24 +39,31 @@ interface EmojiCategory {
   emojis: string[];
 }
 
-const EventIllustrationModal = ({
-  visible,
-  onClose,
-  onBack,
-  onContinue,
-}: EventIllustrationModalProps) => {
+const EventIllustrationModal = () => {
+  const navigation = useNavigation<EventIllustrationNavigationProp>();
+  const route = useRoute<EventIllustrationRouteProp>();
+  const { createNewEvent, saveDraft, deleteDraft } = useEvents(); // Obtenir les fonctions du contexte
+
+  // Récupérer les données de l'événement des paramètres de la route
+  // Utiliser 'as any' pour contourner les problèmes de typage avec Partial<Event> des params
+  const eventDataFromParams = route.params?.eventData || {};
+  const isDraft = route.params?.isDraft; // Récupérer si c'est un brouillon
+  const draftId = route.params?.draftId; // Récupérer l'ID du brouillon
+
   // États
   const [selectedColorIndex, setSelectedColorIndex] = useState(0);
   const [selectedEmojiIndex, setSelectedEmojiIndex] = useState(0);
   const [selectedCategoryIndex, setSelectedCategoryIndex] = useState(0);
   const [currentEmoji, setCurrentEmoji] = useState('🪩');
-  
+  const [isEmojiKeyboardOpen, setIsEmojiKeyboardOpen] = useState(false); // État pour le clavier emoji
+
   // Références
   const colorsScrollRef = useRef<ScrollView>(null);
   const categoryListRef = useRef<FlatList>(null);
   const previewRef = useRef<View>(null);
   const scrollViewRef = useRef<ScrollView>(null);
-  
+  const emojiKeyboardHeight = useRef(new Animated.Value(0)).current; // Valeur animée pour la hauteur
+
   // Données
   const colors = [
     { id: 'green', color: '#E8FFE8' },
@@ -56,7 +72,7 @@ const EventIllustrationModal = ({
     { id: 'pink', color: '#FFE6E6' },
     { id: 'yellow', color: '#FFF8E6' },
   ];
-  
+
   const mainEmojis = [
     { id: 'disco', emoji: '🪩' },
     { id: 'party', emoji: '🎉' },
@@ -64,56 +80,43 @@ const EventIllustrationModal = ({
     { id: 'glasses', emoji: '🥂' },
   ];
 
-  // Effet pour initialiser l'emoji courant
+  // Effet pour initialiser l'emoji et la couleur
   useEffect(() => {
-    setCurrentEmoji(mainEmojis[selectedEmojiIndex].emoji);
-  }, []);
-
-  // Catégories d'emojis - Version moderne
-  const emojiCategories: EmojiCategory[] = [
-    {
-      id: 'frequents',
-      name: 'Fréquents',
-      emojis: ['❤️', '👍', '😊', '✨', '🔥', '🙏', '😂', '🥰', '😘', '😍', '🤔', '🎉', '🎂', '🎁', '🥳', '👏', '🙌', '🍾', '🥂', '🤝', '🎊', '🎯', '💯', '💕', '🥹', '💋', '💪', '👌', '🤞', '🫶', '🙂', '😉']
-    },
-    {
-      id: 'smileys',
-      name: 'Smileys',
-      emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢']
-    },
-    {
-      id: 'people',
-      name: 'Personnes',
-      emojis: ['👋', '🤚', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '👇', '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🙏', '✍️', '💅', '🤳', '💪', '🦾', '🦿', '🦵', '🦶', '👣', '👀', '👁️', '👅', '👄', '🧠']
-    },
-    {
-      id: 'celebration',
-      name: 'Fête',
-      emojis: ['🎊', '🎉', '🎈', '🪩', '🎂', '🍰', '🧁', '🎁', '🎆', '🎇', '🎏', '🎐', '🎀', '🎎', '🏮', '🪅', '🪩', '🪄', '👑', '🎢', '🎡', '🎠', '🎪', '🎭', '🎨', '🎬', '🎤', '🎧', '🎼', '🎹', '🥁', '🎷', '🎺', '🎸', '🎻', '🎲', '🎯', '🎮', '🎰', '🏆']
-    },
-    {
-      id: 'activities',
-      name: 'Activités',
-      emojis: ['⚽', '🏀', '🏈', '⚾', '🥎', '🎾', '🏐', '🏉', '🥏', '🎱', '🪀', '🏓', '🏸', '🏒', '🏑', '🥍', '🏏', '🪃', '🥅', '⛳', '🪁', '🏹', '🎣', '🤿', '🥊', '🥋', '🎽', '⛸️', '🛷', '🎿', '⛷️', '🏂', '🪂', '🏋️', '🤼', '🤸', '⛹️', '🤺', '🤾', '🏌️', '🏇', '🧘', '🏄', '🏊']
-    },
-    {
-      id: 'travel',
-      name: 'Voyages',
-      emojis: ['🚗', '🚕', '🚙', '🚌', '🚎', '🏎️', '🚓', '🚑', '🚒', '🚐', '🛻', '🚚', '🚛', '🚜', '🛵', '🏍️', '🛺', '🚲', '🛴', '🚄', '✈️', '🛫', '🛬', '🚀', '⛵', '🚢', '🚂', '🚆', '🏖️', '🏝️', '🏜️', '🌋', '⛰️', '🏔️', '🗻', '🏕️', '🏞️', '🌅', '🌄', '🌇', '🌆', '🏙️']
+    const initialEmoji = (eventDataFromParams as { emoji?: string })?.emoji ?? mainEmojis[0].emoji; // Assertion de type
+    setCurrentEmoji(initialEmoji);
+    const initialEmojiIndex = mainEmojis.findIndex(e => e.emoji === initialEmoji);
+    if (initialEmojiIndex !== -1) {
+        setSelectedEmojiIndex(initialEmojiIndex);
     }
+    const initialColorIndex = colors.findIndex(c => c.color === (eventDataFromParams as { color?: string })?.color); // Assertion de type
+     if (initialColorIndex !== -1) {
+         setSelectedColorIndex(initialColorIndex);
+     }
+  }, [eventDataFromParams]);
+
+  // Catégories d'emojis
+  const emojiCategories: EmojiCategory[] = [
+    { id: 'frequents', name: 'Fréquents', emojis: ['❤️', '👍', '😊', '✨', '🔥', '🙏', '😂', '🥰', '😘', '😍', '🤔', '🎉', '🎂', '🎁', '🥳', '👏', '🙌', '🍾', '🥂', '🤝', '🎊', '🎯', '💯', '💕', '🥹', '💋', '💪', '👌', '🤞', '🫶', '🙂', '😉'] },
+    { id: 'smileys', name: 'Smileys', emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢'] },
+    { id: 'people', name: 'Personnes', emojis: ['👋', '🤚', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '👇', '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🙏', '✍️', '💅', '🤳', '💪', '🦾', '🦿', '🦵', '🦶', '👣', '👀', '👁️', '👅', '👄', '🧠'] },
+    { id: 'celebration', name: 'Fête', emojis: ['🎊', '🎉', '🎈', '🪩', '🎂', '🍰', '🧁', '🎁', '🎆', '🎇', '🎏', '🎐', '🎀', '🎎', '🏮', '🪅', '🪩', '🪄', '👑', '🎢', '🎡', '🎠', '🎪', '🎭', '🎨', '🎬', '🎤', '🎧', '🎼', '🎹', '🥁', '🎷', '🎺', '🎸', '🎻', '🎲', '🎯', '🎮', '🎰', '🏆'] },
+    { id: 'activities', name: 'Activités', emojis: ['⚽', '🏀', '🏈', '⚾', '🥎', '🎾', '🏐', '🏉', '🥏', '🎱', '🪀', '🏓', '🏸', '🏒', '🏑', '🥍', '🏏', '🪃', '🥅', '⛳', '🪁', '🏹', '🎣', '🤿', '🥊', '🥋', '🎽', '⛸️', '🛷', '🎿', '⛷️', '🏂', '🪂', '🏋️', '🤼', '🤸', '⛹️', '🤺', '🤾', '🏌️', '🏇', '🧘', '🏄', '🏊'] },
+    { id: 'travel', name: 'Voyages', emojis: ['🚗', '🚕', '🚙', '🚌', '🚎', '🏎️', '🚓', '🚑', '🚒', '🚐', '🛻', '🚚', '🚛', '🚜', '🛵', '🏍️', '🛺', '🚲', '🛴', '🚄', '✈️', '🛫', '🛬', '🚀', '⛵', '🚢', '🚂', '🚆', '🏖️', '🏝️', '🏜️', '🌋', '⛰️', '🏔️', '🗻', '🏕️', '🏞️', '🌅', '🌄', '🌇', '🌆', '🏙️'] }
   ];
-  
+
+  // Animation pour le clavier emoji
+  useEffect(() => {
+    Animated.timing(emojiKeyboardHeight, {
+      toValue: isEmojiKeyboardOpen ? 280 : 0, // Hauteur cible
+      duration: 300,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: false, // Height animation cannot use native driver
+    }).start();
+  }, [isEmojiKeyboardOpen, emojiKeyboardHeight]);
+
   // Gestion de l'emoji sélectionné
   const handleEmojiSelected = (emoji: string) => {
-    // Mettre à jour l'emoji sélectionné
     setCurrentEmoji(emoji);
-    
-    // Mettre à jour l'emoji principal correspondant à l'index sélectionné
-    const newEmojis = [...mainEmojis];
-    newEmojis[selectedEmojiIndex] = { ...newEmojis[selectedEmojiIndex], emoji };
-    mainEmojis[selectedEmojiIndex] = newEmojis[selectedEmojiIndex];
-    
-    // Faire défiler vers la prévisualisation si elle n'est pas visible
     if (scrollViewRef.current) {
       scrollViewRef.current.scrollTo({ y: 0, animated: true });
     }
@@ -122,12 +125,10 @@ const EventIllustrationModal = ({
   // Changement de catégorie
   const handleCategoryChange = (index: number) => {
     setSelectedCategoryIndex(index);
-    
-    // Faire défiler à la position de la catégorie
-    categoryListRef.current?.scrollToIndex({ 
-      index, 
+    categoryListRef.current?.scrollToIndex({
+      index,
       animated: true,
-      viewPosition: 0.5 
+      viewPosition: 0.5
     });
   };
 
@@ -135,25 +136,111 @@ const EventIllustrationModal = ({
   const handleSelectColor = (index: number) => {
     setSelectedColorIndex(index);
     colorsScrollRef.current?.scrollTo({
-      x: index * 70 - SCREEN_WIDTH / 3,
+      x: index * 70 - SCREEN_WIDTH / 3, // Ajuster le scroll pour centrer
       animated: true,
     });
   };
-  
+
   // Sélection de l'emoji principal
   const handleSelectEmoji = (index: number) => {
     setSelectedEmojiIndex(index);
     setCurrentEmoji(mainEmojis[index].emoji);
   };
-  
-  // Continuer avec la sélection
-  const handleContinue = () => {
-    onContinue({
-      id: `illustration-${colors[selectedColorIndex].id}-${mainEmojis[selectedEmojiIndex].id}`,
-      backgroundColor: colors[selectedColorIndex].color,
-      emoji: currentEmoji,
-    });
-  };
+
+  // Helper pour obtenir les données actuelles de l'événement
+  const getCurrentEventData = useCallback((): Partial<Event> => {
+      const params = eventDataFromParams as any; // Utiliser 'as any' pour l'accès
+      const eventType = ['collectif', 'individuel', 'special'].includes(params['type'] ?? '')
+            ? (params['type'] as 'collectif' | 'individuel' | 'special')
+            : 'individuel';
+
+      return {
+        ...eventDataFromParams,
+        type: eventType,
+        emoji: currentEmoji, // Ajouter l'emoji actuel
+        color: colors[selectedColorIndex].color, // Ajouter la couleur actuelle
+        // Les autres champs sont déjà dans eventDataFromParams
+      };
+  }, [eventDataFromParams, currentEmoji, selectedColorIndex, colors]);
+
+
+  // Continuer vers l'étape suivante (sélection de l'image de fond)
+  const handleContinue = useCallback(async () => {
+    // Obtenir les données actuelles (incluant couleur et emoji)
+    const currentData = getCurrentEventData();
+
+    console.log("EventIllustrationModal: Saving draft and navigating to EventBackground...", currentData);
+
+    try {
+      // Sauvegarder le brouillon avec l'étape actuelle
+      const savedDraftId = await saveDraft(currentData, 'EventIllustration', draftId);
+
+      if (savedDraftId) {
+        // Naviguer vers l'écran suivant (EventBackground) en passant les données et l'ID du brouillon
+        navigation.navigate('EventBackground', { eventData: currentData, draftId: savedDraftId, isDraft: true });
+      } else {
+        console.error("EventIllustrationModal: Failed to save draft before navigating.");
+        toast.error("Erreur lors de la sauvegarde du brouillon.");
+      }
+    } catch (error) {
+      console.error("EventIllustrationModal: Error saving draft or navigating", error);
+      toast.error("Erreur lors de la sauvegarde ou de la navigation.");
+    }
+
+    // --- La logique de création finale est déplacée plus loin dans le flux ---
+    /*
+    // Obtenir les données finales en utilisant le helper
+    const finalEventData = getCurrentEventData() as Omit<Event, 'id' | 'creatorId' | 'createdAt' | 'updatedAt'>;
+
+    // S'assurer que les champs obligatoires non optionnels sont présents (même si vides)
+    finalEventData.title = finalEventData.title || 'Nouvel événement';
+    finalEventData.startDate = finalEventData.startDate || new Date().toISOString();
+    // ... autres champs ...
+
+    console.log("LOG: Attempting to create event with final data:", JSON.stringify(finalEventData, null, 2));
+    try {
+      const createdEvent = await createNewEvent(finalEventData);
+      if (createdEvent && createdEvent.id) {
+        navigation.navigate('EventInviteFriends', { eventId: createdEvent.id });
+        if (isDraft && draftId) { await deleteDraft(draftId); }
+      } else { // ... gestion erreur ... }
+    } catch (error) { // ... gestion erreur ... }
+    */
+  }, [
+      getCurrentEventData,
+      saveDraft,
+      draftId,
+      navigation,
+      // createNewEvent, // Retiré des dépendances pour l'instant
+      // deleteDraft, // Retiré des dépendances pour l'instant
+      // isDraft // Retiré des dépendances pour l'instant
+  ]);
+
+  // Utiliser la fonction goBack pour le bouton retour
+  // Modifié pour sauvegarder le brouillon avant de revenir
+  const handleBack = useCallback(async () => {
+      const currentData = getCurrentEventData();
+      console.log("EventIllustrationModal: Saving draft on back...", currentData);
+      try {
+        await saveDraft(currentData, 'EventIllustration', draftId);
+      } catch (error) {
+        console.error("EventIllustrationModal: Failed to save draft on back", error);
+      }
+      navigation.goBack();
+  }, [navigation, getCurrentEventData, saveDraft, draftId]); // Ajouter les dépendances
+
+  // Utiliser popToTop pour le bouton fermer (X)
+  // Modifié pour sauvegarder le brouillon avant de fermer
+  const handleClose = useCallback(async () => {
+      const currentData = getCurrentEventData();
+      console.log("EventIllustrationModal: Saving draft on close...", currentData);
+      try {
+        await saveDraft(currentData, 'EventIllustration', draftId);
+      } catch (error) {
+        console.error("EventIllustrationModal: Failed to save draft on close", error);
+      }
+      navigation.popToTop();
+  }, [navigation, getCurrentEventData, saveDraft, draftId]); // Ajouter les dépendances
 
   // Rendu d'un onglet de catégorie
   const renderCategoryTab = ({ item, index }: { item: EmojiCategory; index: number }) => (
@@ -175,34 +262,28 @@ const EventIllustrationModal = ({
   );
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={false}
-      statusBarTranslucent
-    >
-      <StatusBar barStyle="dark-content" />
       <SafeAreaView style={styles.safeArea}>
+        {/* StatusBar gérée par le navigateur */}
         <View style={styles.container}>
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity 
-              style={styles.closeButton} 
-              onPress={onClose}
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={handleClose} // Utiliser handleClose (popToTop)
               hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
             >
               <Text style={styles.closeButtonText}>✕</Text>
             </TouchableOpacity>
-            
+
             <Text style={styles.titleText}>Choisir une illustration</Text>
-            
+
             <TouchableOpacity style={styles.helpButton}>
               <Text style={styles.helpButtonText}>?</Text>
             </TouchableOpacity>
           </View>
-          
+
           {/* Content Container */}
-          <ScrollView 
+          <ScrollView
             ref={scrollViewRef}
             style={styles.scrollContent}
             contentContainerStyle={styles.scrollContentContainer}
@@ -210,11 +291,11 @@ const EventIllustrationModal = ({
             showsVerticalScrollIndicator={false}
           >
             {/* Preview Area */}
-            <View 
+            <View
               ref={previewRef}
               style={styles.previewContainer}
             >
-              <View 
+              <View
                 style={[
                   styles.previewBox,
                   { backgroundColor: colors[selectedColorIndex].color },
@@ -223,7 +304,7 @@ const EventIllustrationModal = ({
                 <Text style={styles.previewEmoji}>{currentEmoji}</Text>
               </View>
             </View>
-            
+
             {/* Color Selection */}
             <ScrollView
               ref={colorsScrollRef}
@@ -245,7 +326,7 @@ const EventIllustrationModal = ({
                 />
               ))}
             </ScrollView>
-            
+
             {/* Emoji Selection */}
             <View style={styles.emojiContainer}>
               {mainEmojis.map((emoji, index) => (
@@ -261,69 +342,88 @@ const EventIllustrationModal = ({
                   <Text style={styles.emojiButtonText}>{emoji.emoji}</Text>
                 </TouchableOpacity>
               ))}
+              {/* Bouton pour ouvrir/fermer le clavier emoji */}
+              <TouchableOpacity
+                style={styles.toggleEmojiKeyboardButton}
+                onPress={() => setIsEmojiKeyboardOpen(!isEmojiKeyboardOpen)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={isEmojiKeyboardOpen ? "close-circle-outline" : "add-circle-outline"}
+                  size={30}
+                  color="#A0A0A0"
+                />
+              </TouchableOpacity>
             </View>
           </ScrollView>
-          
+
           {/* Navigation Buttons */}
           <View style={styles.navigationBar}>
-            <TouchableOpacity 
-              style={styles.backButton} 
-              onPress={onBack}
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={handleBack} // Utiliser handleBack (goBack)
               activeOpacity={0.7}
             >
+              <Ionicons name="chevron-back" size={24} color="#666" />
               <Text style={styles.backButtonText}>Retour</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.continueButton} 
+
+            <TouchableOpacity
+              style={styles.continueButton}
               onPress={handleContinue}
               activeOpacity={0.7}
             >
               <Text style={styles.continueButtonText}>Continuer</Text>
+              <Ionicons name="chevron-forward" size={24} color="white" />
             </TouchableOpacity>
           </View>
-          
-          {/* Emoji Keyboard - Toujours visible */}
-          <View style={styles.emojiKeyboardContainer}>
-            {/* En-tête avec les onglets de catégories */}
-            <View style={styles.categoryTabs}>
-              <FlatList
-                ref={categoryListRef}
-                horizontal
-                data={emojiCategories}
-                renderItem={renderCategoryTab}
-                keyExtractor={(item) => item.id}
-                showsHorizontalScrollIndicator={false}
-                style={styles.categoryTabsList}
-              />
-            </View>
 
-            {/* Grille d'emojis */}
-            <View style={styles.emojiGridContainer}>
-              <FlatList
-                data={emojiCategories[selectedCategoryIndex].emojis}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={styles.emojiGridItem}
-                    onPress={() => handleEmojiSelected(item)}
-                    activeOpacity={0.6}
-                  >
-                    <Text style={styles.emojiText}>{item}</Text>
-                  </TouchableOpacity>
-                )}
-                keyExtractor={(item, index) => `emoji-${index}`}
-                numColumns={8}
-                showsVerticalScrollIndicator={false}
-                style={styles.emojiGrid}
-                initialNumToRender={32}
-                removeClippedSubviews={true}
-              />
-            </View>
-          </View>
+          {/* Emoji Keyboard - Toujours visible */}
+          {/* Clavier Emoji (conditionnel et animé) */}
+          <Animated.View style={[styles.emojiKeyboardContainer, { height: emojiKeyboardHeight }]}>
+             {/* Le contenu ne s'affiche que si la hauteur est > 0 pour éviter les rendus inutiles */}
+             {isEmojiKeyboardOpen && (
+                <>
+                  {/* En-tête avec les onglets de catégories */}
+                  <View style={styles.categoryTabs}>
+                    <FlatList
+                      ref={categoryListRef}
+                      horizontal
+                      data={emojiCategories}
+                      renderItem={renderCategoryTab}
+                      keyExtractor={(item) => item.id}
+                      showsHorizontalScrollIndicator={false}
+                      style={styles.categoryTabsList}
+                    />
+                  </View>
+
+                  {/* Grille d'emojis */}
+                  <View style={styles.emojiGridContainer}>
+                    <FlatList
+                      data={emojiCategories[selectedCategoryIndex].emojis}
+                      renderItem={({ item }) => (
+                        <TouchableOpacity
+                          style={styles.emojiGridItem}
+                          onPress={() => handleEmojiSelected(item)}
+                          activeOpacity={0.6}
+                        >
+                          <Text style={styles.emojiText}>{item}</Text>
+                        </TouchableOpacity>
+                      )}
+                      keyExtractor={(item, index) => `emoji-${index}`}
+                      numColumns={8}
+                      showsVerticalScrollIndicator={true}
+                      style={styles.emojiGrid}
+                      initialNumToRender={32} // Augmenter pour remplir plus vite
+                      removeClippedSubviews={true}
+                    />
+                  </View>
+                </>
+             )}
+          </Animated.View>
         </View>
       </SafeAreaView>
-    </Modal>
-  );
+  ); // Fin du return du composant fonctionnel
 };
 
 const styles = StyleSheet.create({
@@ -437,7 +537,15 @@ const styles = StyleSheet.create({
   emojiButtonText: {
     fontSize: 35,
   },
-  
+  toggleEmojiKeyboardButton: {
+    width: 70, // Même largeur que les boutons emoji
+    height: 70, // Même hauteur
+    justifyContent: 'center',
+    alignItems: 'center',
+    // backgroundColor: '#FAFAFA', // Optionnel: fond léger
+    // borderRadius: 20, // Optionnel: arrondi
+  },
+
   // Navigation Bar
   navigationBar: {
     flexDirection: 'row',
@@ -448,35 +556,45 @@ const styles = StyleSheet.create({
     borderTopColor: '#EEEEEE',
     backgroundColor: '#FFFFFF',
   },
-  backButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: '#F5F5F5',
+  backButton: { // Style de EventOptionalInfoModal
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F0F0F0',
+    borderRadius: 30,
+    paddingVertical: 15,
+    paddingHorizontal: 25,
   },
-  backButtonText: {
+  backButtonText: { // Style de EventOptionalInfoModal
     fontSize: 16,
-    fontWeight: '500',
-    color: '#555555',
+    fontWeight: 'bold',
+    color: '#666',
+    marginLeft: 5, // Ajusté pour l'icône
   },
-  continueButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: '#5A67F2',
+  continueButton: { // Style de EventOptionalInfoModal
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'black',
+    borderRadius: 30,
+    paddingVertical: 15,
+    paddingHorizontal: 25,
+    gap: 8, // Ajouté pour espacer texte et icône
   },
-  continueButtonText: {
+  continueButtonText: { // Style de EventOptionalInfoModal
     fontSize: 16,
-    fontWeight: '500',
-    color: '#FFFFFF',
+    fontWeight: 'bold', // Changé en bold
+    color: 'white',
+    // marginRight: 5, // Supprimé car gap est utilisé
   },
-  
-  // Emoji Keyboard - Toujours visible
+
+  // Emoji Keyboard - Conditionnel et animé
   emojiKeyboardContainer: {
-    height: 280,
+    // height: 280, // La hauteur est maintenant animée
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#EEEEEE',
+    overflow: 'hidden', // Important pour l'animation de hauteur
   },
   // Onglets de catégories
   categoryTabs: {
@@ -505,17 +623,18 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   // Grille d'emojis
-  emojiGridContainer: {
-    flex: 1,
+  emojiGridContainer: { // Ajuster pour scroll vertical
+    flex: 1, // Prendre l'espace vertical restant dans emojiKeyboardContainer
     backgroundColor: '#FFFFFF',
   },
-  emojiGrid: {
-    flex: 1,
-    paddingHorizontal: 8,
+  emojiGrid: { // Ajuster pour scroll horizontal
+    flex: 1, // Permettre à la FlatList de s'étendre
+    paddingHorizontal: 8, // Garder le padding horizontal
     paddingVertical: 8,
   },
   emojiGridItem: {
-    width: SCREEN_WIDTH / 8,
+    // width: SCREEN_WIDTH / 8, // La largeur sera déterminée par le contenu ou fixe
+    width: SCREEN_WIDTH / 8 - 4, // Calculer la largeur en fonction du nombre de colonnes et padding
     height: 42,
     justifyContent: 'center',
     alignItems: 'center',

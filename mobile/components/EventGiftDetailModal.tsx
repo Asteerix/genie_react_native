@@ -22,10 +22,10 @@ interface EventGiftDetailModalProps {
     name: string;
     price: string;
     image: string;
-    quantity: number;
+    quantity?: number; // Rendre la quantité optionnelle
     size?: string;
     color?: string;
-    addedBy: {
+    addedBy?: { // Rendre addedBy optionnel
       name: string;
       avatar: string;
     };

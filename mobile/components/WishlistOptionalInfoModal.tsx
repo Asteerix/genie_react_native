@@ -16,6 +16,7 @@ import {
 import { Ionicons, Feather, AntDesign } from '@expo/vector-icons';
 import { toast } from 'sonner-native';
 import AddAdminModal from './AddAdminModal';
+import { getUserFriends } from '../api/contacts';
 
 interface Admin {
   id: string;
@@ -35,16 +36,6 @@ interface WishlistOptionalInfoModalProps {
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MODAL_HEIGHT = 550;
 
-// Données des administrateurs (simulées)
-const MOCK_ADMINS: Admin[] = [
-  {
-    id: '1',
-    name: 'Paul Marceau',
-    username: 'paulmarceau',
-    avatar: 'https://api.a0.dev/assets/image?text=man%20beard%20hat%20portrait%20cartoon%20orange%20background&aspect=1:1&seed=13'
-  }
-];
-
 const WishlistOptionalInfoModal: React.FC<WishlistOptionalInfoModalProps> = ({
   visible,
   onClose,
@@ -54,7 +45,8 @@ const WishlistOptionalInfoModal: React.FC<WishlistOptionalInfoModalProps> = ({
 }) => {
   const [description, setDescription] = useState('');
   const [descriptionEnabled, setDescriptionEnabled] = useState(false);
-  const [addAdmins, setAddAdmins] = useState(false);  const [admins, setAdmins] = useState<Admin[]>(MOCK_ADMINS);
+  const [addAdmins, setAddAdmins] = useState(false);  
+  const [admins, setAdmins] = useState<Admin[]>([]);
   const [showAddAdminModal, setShowAddAdminModal] = useState(false);
   
   // Animation values
@@ -111,16 +103,33 @@ const WishlistOptionalInfoModal: React.FC<WishlistOptionalInfoModalProps> = ({
     });
   };
   
-  const handleComplete = () => {
-    onComplete({
-      description: descriptionEnabled ? description : '',
-      addAdmins: addAdmins
-    });
-  };
+  const handleComplete = async () => {
+      try {
+        console.log('WishlistOptionalInfoModal - handleComplete called');
+        // Call parent's onComplete with optional info
+        await onComplete({
+          description: descriptionEnabled ? description : '',
+          addAdmins: addAdmins
+        });
+        
+        // Debug log to track modal closing
+        console.log('WishlistOptionalInfoModal - Before closing modal');
+        
+        // Close modal after completion
+        closeModal();
+        
+        console.log('WishlistOptionalInfoModal - After calling closeModal');
+      } catch (error) {
+        console.error('Error completing wishlist:', error);
+        toast.error('Une erreur est survenue');
+      }
+    };
 
   const handleRemoveAdmin = (adminId: string) => {
     setAdmins(admins.filter(admin => admin.id !== adminId));
-  };  const handleAddAdmin = () => {
+  };  
+  
+  const handleAddAdmin = () => {
     setShowAddAdminModal(true);
   };
   
@@ -128,7 +137,9 @@ const WishlistOptionalInfoModal: React.FC<WishlistOptionalInfoModalProps> = ({
     // Mettre à jour la liste des administrateurs
     setAdmins(selectedAdmins);
     setShowAddAdminModal(false);
-  };  if (!visible) return null;
+  };  
+  
+  if (!visible) return null;
   
   return (
     <Modal
@@ -138,12 +149,10 @@ const WishlistOptionalInfoModal: React.FC<WishlistOptionalInfoModalProps> = ({
       statusBarTranslucent
     >
       <View style={styles.overlay}>
-        <Animated.View 
-          style={[
-            styles.modalContainer,
-            { transform: [{ translateY }] }
-          ]}
-        >
+        <Animated.View style={[
+          styles.modalContainer,
+          { transform: [{ translateY }] }
+        ]}>
           {/* Draggable handle */}
           <View 
             {...panResponder.panHandlers}
@@ -248,7 +257,8 @@ const WishlistOptionalInfoModal: React.FC<WishlistOptionalInfoModalProps> = ({
                     <Ionicons name="chevron-forward" size={24} color="#999" />
                   </TouchableOpacity>
                 </View>
-              )}            </View>
+              )}
+            </View>
           </ScrollView>
 
           {/* Add Admin Modal */}

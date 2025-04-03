@@ -184,13 +184,36 @@ const SignupProfileConfirmScreen = () => {
       setIsSubmitting(true);
       
       // Inscription finale avec toutes les données collectées
-      await signUp(emailOrPhone, password, false, {
+      const signupResult = await signUp(emailOrPhone, password, false, {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         gender: gender,
         birthdate: birthdate,
-        avatar: avatar
+        // L'avatar sera téléchargé séparément après inscription
       });
+      
+      // Si l'inscription a réussi et qu'il y a un avatar local à télécharger
+      if (signupResult && avatar && avatar.startsWith('file://')) {
+        import('../../api/auth').then(async (authApi) => {
+          try {
+            console.log('Téléchargement de la photo de profil après inscription...');
+            // Vérifier si c'est un avatar généré ou une photo
+            const isGeneratedAvatar = avatar.includes('api.a0.dev/assets/image');
+            
+            if (isGeneratedAvatar) {
+              // Utiliser l'API d'avatar pour les avatars générés
+              await authApi.uploadAvatar(avatar);
+            } else {
+              // Utiliser l'API de photo de profil pour les photos
+              await authApi.uploadProfilePicture(avatar);
+            }
+            console.log('Photo de profil téléchargée avec succès');
+          } catch (uploadError) {
+            console.error('Erreur lors du téléchargement de la photo de profil:', uploadError);
+            // Continuer même en cas d'erreur - l'utilisateur pourra réessayer plus tard
+          }
+        });
+      }
       
       // Naviguer vers l'écran "Trouve tes amis" après l'inscription réussie
       navigation.reset({
@@ -200,6 +223,10 @@ const SignupProfileConfirmScreen = () => {
     } catch (error) {
       console.error(error);
       setIsSubmitting(false);
+      Alert.alert(
+        "Erreur d'inscription",
+        "Une erreur est survenue lors de l'inscription. Veuillez réessayer."
+      );
     }
   };
   

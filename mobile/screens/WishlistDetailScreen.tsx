@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -10,115 +10,72 @@ import {
   StatusBar,
   Dimensions,
   Platform,
-  BackHandler
+  BackHandler,
+  ActivityIndicator
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { Ionicons, AntDesign, Feather } from '@expo/vector-icons';
 import TransferWishModal from '../components/TransferWishModal';
+import { useWishlist } from '../context/WishlistContext';
+import { WishlistType, WishItemType } from '../api/wishlists';
+import { toast } from 'sonner-native';
 
 type WishlistDetailScreenRouteProp = RouteProp<RootStackParamList, 'WishlistDetail'>;
 
-// Mock data pour les wishlists
-const MY_WISHLISTS = [
-  {
-    id: '2',
-    type: 'list',
-    title: 'Mes favoris',
-    description: 'Ma liste de favoris du moment',
-    coverImage: 'https://api.a0.dev/assets/image?text=coffee%20beans%20different%20varieties&aspect=16:9&seed=789',
-    isFavorite: true,
-    isOwner: true,
-    products: [
-      {
-        id: 'p1',
-        name: 'Ceinture Diesel',
-        price: '129 €',
-        image: 'https://api.a0.dev/assets/image?text=black%20leather%20belt%20with%20silver%20buckle&aspect=1:1&seed=123',
-        isFavorite: true
-      },
-      {
-        id: 'p3',
-        name: 'Nike Chaussettes de sport',
-        price: '189.99 €',
-        image: 'https://api.a0.dev/assets/image?text=green%20sports%20car%20lego%20technic&aspect=1:1&seed=789',
-        isFavorite: false
-      },
-      {
-        id: 'p5',
-        name: 'Nike Chaussettes de sport',
-        price: '129.95 €',
-        image: 'https://api.a0.dev/assets/image?text=nike%20dunk%20low%20black%20white%20sneakers&aspect=1:1&seed=131415',
-        isFavorite: false
-      },
-      {
-        id: 'p6',
-        name: 'Ajouter',
-        price: '',
-        image: '',
-        isAddButton: true
-      }
-    ]
-  }
-];
-
-// Mock data pour la wishlist d'un ami
-const WISHLIST_DETAIL = {
-  id: '1',
-  title: "70's inspirations",
-  description: "Ici mes inspirations des années 70's...",
-  coverImage: 'https://api.a0.dev/assets/image?text=70s%20retro%20fashion%20woman%20vintage%20car&aspect=16:9',
-  isOwner: false,
-  products: [
-    {
-      id: 'p1',
-      name: 'Amazon Rings',
-      price: '17.90 €',
-      image: 'https://api.a0.dev/assets/image?text=colorful%20resin%20plastic%20rings%20set&aspect=1:1&seed=321',
-      isFavorite: true
-    },
-    {
-      id: 'p2',
-      name: 'SAC SUPER MINI GUCCI',
-      price: '1750 €',
-      image: 'https://api.a0.dev/assets/image?text=small%20white%20designer%20handbag%20with%20gold%20chain&aspect=1:1&seed=654',
-      isFavorite: true
-    },
-    {
-      id: 'p3',
-      name: 'Zara Jean',
-      price: '59.99 €',
-      image: 'https://api.a0.dev/assets/image?text=light%20blue%20flared%20jeans%20denim%20seventies&aspect=1:1&seed=987',
-      isFavorite: true
-    },
-    {
-      id: 'p4',
-      name: 'Asos Boots',
-      price: '87.95 €',
-      image: 'https://api.a0.dev/assets/image?text=suede%20beige%20ankle%20boots&aspect=1:1&seed=135',
-      isFavorite: false
-    }
-  ]
-};
-
 // Constantes pour les dimensions
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const CARD_GAP = 12;
+const CARD_WIDTH = (SCREEN_WIDTH - 40 - CARD_GAP) / 2; // 40 = padding horizontal du container
 
 const WishlistDetailScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<WishlistDetailScreenRouteProp>();
-  const { wishlistId } = route.params || { wishlistId: '2' };
+  const { wishlistId } = route.params;
   
-  // Déterminer si c'est la wishlist de l'utilisateur
-  const isMyWishlist = wishlistId === '2';
+  const { 
+    getWishlist, 
+    getItems, 
+    removeWishItem, 
+    editWishItem,
+    reserveItem,
+    shareWithUser
+  } = useWishlist();
   
   // États pour le composant
-  const [wishlistData, setWishlistData] = useState(isMyWishlist ? MY_WISHLISTS[0] : WISHLIST_DETAIL);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [wishlistData, setWishlistData] = useState<WishlistType | null>(null);
+  const [wishlistItems, setWishlistItems] = useState<WishItemType[]>([]);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<{[key: string]: boolean}>({});
   const [showTransferModal, setShowTransferModal] = useState(false);
   const selectedCount = Object.values(selectedItems).filter(v => v).length;
+  
+  // Charger les données de la wishlist
+  useEffect(() => {
+    const loadWishlistData = async () => {
+      setIsLoading(true);
+      try {
+        const wishlist = await getWishlist(wishlistId);
+        setWishlistData(wishlist);
+        
+        if (wishlist.items && wishlist.items.length > 0) {
+          setWishlistItems(wishlist.items);
+        } else {
+          const items = await getItems(wishlistId);
+          setWishlistItems(items);
+        }
+      } catch (error) {
+        console.error('Erreur lors du chargement de la wishlist:', error);
+        toast.error('Impossible de charger la wishlist');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadWishlistData();
+  }, [wishlistId]);
   
   // Initialisation
   useEffect(() => {
@@ -131,10 +88,10 @@ const WishlistDetailScreen = () => {
     return () => {
       backHandler.remove();
     };
-  }, []);
+  }, [showTransferModal, isSelectionMode]);
   
   // Gestion du bouton retour
-  const handleBackPress = () => {
+  const handleBackPress = useCallback(() => {
     if (showTransferModal) {
       setShowTransferModal(false);
       return true;
@@ -143,7 +100,7 @@ const WishlistDetailScreen = () => {
       return true;
     }
     return false;
-  };
+  }, [showTransferModal, isSelectionMode]);
 
   // Gestionnaires d'événements
   const handleBack = () => {
@@ -154,25 +111,45 @@ const WishlistDetailScreen = () => {
     setShowTransferModal(true);
   };
 
-  const toggleFavorite = (productId: string) => {
-    setWishlistData(prev => ({
-      ...prev,
-      products: prev.products.map(product => 
-        product.id === productId 
-          ? { ...product, isFavorite: !product.isFavorite } 
-          : product
-      )
-    }));
+  const toggleFavorite = async (itemId: string) => {
+    try {
+      const itemToUpdate = wishlistItems.find(item => item.id === itemId);
+      if (!itemToUpdate) return;
+      
+      await editWishItem(itemId, { isFavorite: !itemToUpdate.isFavorite });
+      
+      setWishlistItems(prev => 
+        prev.map(item => 
+          item.id === itemId 
+            ? { ...item, isFavorite: !item.isFavorite } 
+            : item
+        )
+      );
+    } catch (error) {
+      console.error('Erreur lors de la modification du vœu:', error);
+      toast.error('Erreur lors de la modification du vœu');
+    }
   };
 
-  const handleAddToCart = (productId: string) => {
-    console.log('Add to cart:', productId);
-    // Dans une vraie app, implémentez l'ajout au panier ici
+  const handleAddToCart = async (itemId: string) => {
+    try {
+      await reserveItem(itemId, true);
+      setWishlistItems(prev => 
+        prev.map(item => 
+          item.id === itemId 
+            ? { ...item, isReserved: true } 
+            : item
+        )
+      );
+      toast.success('Produit réservé avec succès');
+    } catch (error) {
+      console.error('Erreur lors de la réservation:', error);
+      toast.error('Erreur lors de la réservation');
+    }
   };
   
   const handleAddProduct = () => {
-    console.log('Add new product to wishlist');
-    // Dans une vraie app, naviguer vers l'écran d'ajout de produit
+    navigation.navigate('SearchScreen', { wishlistId });
   };
   
   const handleSelect = () => {
@@ -185,43 +162,76 @@ const WishlistDetailScreen = () => {
     setSelectedItems({});
   };
   
-  const handleToggleSelection = (productId: string) => {
+  const handleToggleSelection = (itemId: string) => {
     setSelectedItems(prev => ({
       ...prev,
-      [productId]: !prev[productId]
+      [itemId]: !prev[itemId]
     }));
   };
   
-  const handleDeleteSelected = () => {
+  const handleDeleteSelected = async () => {
     const selectedIds = Object.entries(selectedItems)
       .filter(([_, selected]) => selected)
       .map(([id]) => id);
       
     if (selectedIds.length === 0) return;
     
-    setWishlistData(prev => ({
-      ...prev,
-      products: prev.products.filter(product => 
-        !selectedIds.includes(product.id) || product.isAddButton
-      )
-    }));
-    
-    setIsSelectionMode(false);
-    setSelectedItems({});
+    try {
+      // Supprimer chaque item sélectionné
+      for (const itemId of selectedIds) {
+        await removeWishItem(itemId);
+      }
+      
+      // Mettre à jour l'état local
+      setWishlistItems(prev => 
+        prev.filter(item => !selectedIds.includes(item.id))
+      );
+      
+      toast.success('Vœux supprimés avec succès');
+    } catch (error) {
+      console.error('Erreur lors de la suppression des vœux:', error);
+      toast.error('Erreur lors de la suppression des vœux');
+    } finally {
+      setIsSelectionMode(false);
+      setSelectedItems({});
+    }
   };
   
   const handleSettings = () => {
+    if (!wishlistData) return;
+    
     navigation.navigate('WishlistSettings', {
-      wishlistData: {
-        id: wishlistData.id,
-        title: wishlistData.title,
-        description: wishlistData.description,
-        image: wishlistData.coverImage,
-        isPublic: true,
-        isFavorite: wishlistData.isFavorite || false
-      }
+      wishlistId: wishlistData.id
     });
   };
+
+  // Afficher un indicateur de chargement
+  if (isLoading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="#000" />
+        <Text style={styles.loadingText}>Chargement de la wishlist...</Text>
+      </View>
+    );
+  }
+
+  // Si les données de la wishlist ne sont pas disponibles
+  if (!wishlistData) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <Text style={styles.errorText}>Impossible de charger la wishlist</Text>
+        <TouchableOpacity 
+          style={styles.retryButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.retryButtonText}>Retour</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Le reste du rendu une fois les données chargées
+  const isMyWishlist = wishlistData.isOwner;
 
   // Rendu unifié pour toutes les wishlists
   return (
@@ -230,7 +240,9 @@ const WishlistDetailScreen = () => {
       
       {/* Image de couverture */}
       <Image 
-        source={{ uri: wishlistData.coverImage }} 
+        source={{ 
+          uri: wishlistData.coverImage || 'https://api.a0.dev/assets/image?text=wishlist&aspect=16:9' 
+        }} 
         style={styles.coverImage} 
       />
       <View style={styles.imageTintOverlay} />
@@ -268,78 +280,115 @@ const WishlistDetailScreen = () => {
           
           {/* Grille de produits */}
           <View style={styles.productsGrid}>
-            {wishlistData.products.map((product) => (
-              <View key={product.id} style={styles.productCard}>
-                {product.isAddButton && isMyWishlist && !isSelectionMode ? (
+            {/* Afficher le bouton d'ajout pour les propriétaires de la wishlist */}
+            {isMyWishlist && !isSelectionMode && (
+              <View style={styles.productCard}>
+                <TouchableOpacity 
+                  style={styles.addProductCard}
+                  onPress={handleAddProduct}
+                >
+                  <Feather name="plus" size={40} color="#999" />
+                  <Text style={styles.addProductText}>Ajouter</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            
+            {/* Afficher les items de la wishlist */}
+            {wishlistItems.map((item) => (
+              <View key={item.id} style={styles.productCard}>
+                {isMyWishlist && isSelectionMode ? (
                   <TouchableOpacity 
-                    style={styles.addProductCard}
-                    onPress={handleAddProduct}
+                    style={[
+                      styles.selectionCircle, 
+                      selectedItems[item.id] && styles.selectionCircleSelected
+                    ]}
+                    onPress={() => handleToggleSelection(item.id)}
                   >
-                    <View style={styles.addProductIconContainer}>
-                      <Feather name="plus" size={40} color="#999" />
-                    </View>
-                  </TouchableOpacity>
-                ) : !product.isAddButton && (
-                  <>
-                    {isMyWishlist && isSelectionMode ? (
-                      <TouchableOpacity 
-                        style={[
-                          styles.selectionCircle, 
-                          selectedItems[product.id] && styles.selectionCircleSelected
-                        ]}
-                        onPress={() => handleToggleSelection(product.id)}
-                      >
-                        {selectedItems[product.id] && (
-                          <View style={styles.selectionDot} />
-                        )}
-                      </TouchableOpacity>
-                    ) : product.isFavorite && (
-                      <View style={styles.favoriteIconContainer}>
-                        <AntDesign name="star" size={16} color="black" />
-                      </View>
+                    {selectedItems[item.id] && (
+                      <View style={styles.selectionDot} />
                     )}
-                    
-                    <TouchableOpacity 
-                      style={styles.productImageContainer}
-                      onPress={() => isMyWishlist && isSelectionMode 
-                        ? handleToggleSelection(product.id) 
-                        : navigation.navigate('ProductDetail', { productId: product.id })
-                      }
-                    >
-                      <Image source={{ uri: product.image }} style={styles.productImage} />
-                    </TouchableOpacity>
-                    
-                    <View style={styles.productInfo}>
-                      <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
-                      
-                      {isMyWishlist ? (
-                        <View style={styles.priceAndButtonContainer}>
-                          <Text style={styles.productPrice}>{product.price}</Text>
-                          {!isSelectionMode && (
-                            <TouchableOpacity 
-                              style={styles.arrowButton}
-                              onPress={() => navigation.navigate('ProductDetail', { productId: product.id })}
-                            >
-                              <Ionicons name="arrow-forward" size={20} color="white" />
-                            </TouchableOpacity>
-                          )}
-                        </View>
-                      ) : (
-                        <View style={styles.priceAndCartContainer}>
-                          <Text style={styles.productPrice}>{product.price}</Text>
-                          <TouchableOpacity 
-                            style={styles.cartButton}
-                            onPress={() => handleAddToCart(product.id)}
-                          >
-                            <Feather name="shopping-bag" size={16} color="white" />
-                          </TouchableOpacity>
-                        </View>
+                  </TouchableOpacity>
+                ) : item.isFavorite && (
+                  <View style={styles.favoriteIconContainer}>
+                    <AntDesign name="star" size={16} color="black" />
+                  </View>
+                )}
+                
+                <TouchableOpacity 
+                  style={styles.productImageContainer}
+                  onPress={() => isMyWishlist && isSelectionMode 
+                    ? handleToggleSelection(item.id) 
+                    : navigation.navigate('ProductDetail', { productId: item.id })
+                  }
+                >
+                  <Image 
+                    source={{ 
+                      uri: item.imageURL || 'https://api.a0.dev/assets/image?text=product&aspect=1:1' 
+                    }} 
+                    style={styles.productImage} 
+                  />
+                </TouchableOpacity>
+                
+                <View style={styles.productInfo}>
+                  <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
+                  
+                  {isMyWishlist ? (
+                    <View style={styles.priceAndButtonContainer}>
+                      <Text style={styles.productPrice}>
+                        {item.price ? `${item.price} ${item.currency || '€'}` : ''}
+                      </Text>
+                      {!isSelectionMode && (
+                        <TouchableOpacity 
+                          style={styles.arrowButton}
+                          onPress={() => navigation.navigate('EditWish', { wishId: item.id })}
+                        >
+                          <Ionicons name="arrow-forward" size={20} color="white" />
+                        </TouchableOpacity>
                       )}
                     </View>
-                  </>
-                )}
+                  ) : (
+                    <View style={styles.priceAndCartContainer}>
+                      <Text style={styles.productPrice}>
+                        {item.price ? `${item.price} ${item.currency || '€'}` : ''}
+                      </Text>
+                      <TouchableOpacity 
+                        style={[
+                          styles.cartButton,
+                          item.isReserved && styles.reservedButton
+                        ]}
+                        onPress={() => handleAddToCart(item.id)}
+                        disabled={item.isReserved}
+                      >
+                        <Feather 
+                          name={item.isReserved ? "check" : "shopping-bag"} 
+                          size={16} 
+                          color="white" 
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
               </View>
             ))}
+            
+            {/* Message si aucun produit n'est disponible */}
+            {wishlistItems.length === 0 && (
+              <View style={styles.emptyStateContainer}>
+                <Text style={styles.emptyStateText}>
+                  Aucun vœu dans cette liste pour le moment
+                </Text>
+                {isMyWishlist && (
+                  <TouchableOpacity 
+                    style={styles.addFirstItemButton}
+                    onPress={handleAddProduct}
+                  >
+                    <Text style={styles.addFirstItemButtonText}>
+                      Ajouter votre premier vœu
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
           </View>
         </ScrollView>
         
@@ -363,14 +412,24 @@ const WishlistDetailScreen = () => {
               <TouchableOpacity 
                 style={styles.deleteButton} 
                 onPress={handleDeleteSelected}
+                disabled={selectedCount === 0}
               >
-                <Ionicons name="trash-outline" size={24} color="#FF3B30" />
+                <Ionicons name="trash-outline" size={24} color={selectedCount === 0 ? "#ccc" : "#FF3B30"} />
               </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.bottomActions}>
-              <TouchableOpacity style={styles.selectButton} onPress={handleSelect}>
-                <Text style={styles.selectButtonText}>Sélectionner</Text>
+              <TouchableOpacity 
+                style={styles.selectButton} 
+                onPress={handleSelect}
+                disabled={wishlistItems.length === 0}
+              >
+                <Text style={[
+                  styles.selectButtonText,
+                  wishlistItems.length === 0 && { color: '#aaa' }
+                ]}>
+                  Sélectionner
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
                 <Ionicons name="share-outline" size={24} color="black" />
@@ -400,6 +459,31 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: 'white',
+  },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 15,
+    fontSize: 16,
+    color: '#666',
+  },
+  errorText: {
+    fontSize: 18,
+    color: '#666',
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#000',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 25,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   coverImage: {
     width: '100%',
@@ -509,8 +593,9 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   productCard: {
-    width: '48%',
-    marginBottom: 20,
+    width: CARD_WIDTH,
+    height: CARD_WIDTH,
+    marginBottom: CARD_GAP,
     position: 'relative',
     borderWidth: 1,
     borderColor: '#f0f0f0',
@@ -532,7 +617,7 @@ const styles = StyleSheet.create({
   },
   productImageContainer: {
     width: '100%',
-    height: 180,
+    height: '65%', // Réduit davantage pour donner plus d'espace à la zone d'info
     backgroundColor: '#f7f7f7',
   },
   productImage: {
@@ -541,12 +626,15 @@ const styles = StyleSheet.create({
     resizeMode: 'cover',
   },
   productInfo: {
-    padding: 10,
+    padding: 8,
+    paddingBottom: 15, // Padding inférieur significativement augmenté
+    height: '35%', // Zone d'info agrandie (35% de la hauteur de la carte)
+    justifyContent: 'space-between',
   },
   productName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
-    marginBottom: 5,
+    marginBottom: 2,
   },
   priceAndCartContainer: {
     flexDirection: 'row',
@@ -559,24 +647,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   productPrice: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
   },
   cartButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     backgroundColor: 'black',
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: -5, // Déplace le bouton beaucoup plus vers le haut
+  },
+  reservedButton: {
+    backgroundColor: '#4CAF50',
   },
   arrowButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: 'black',
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: -2, // Déplace le bouton légèrement vers le haut
   },
   addProductCard: {
     width: '100%',
@@ -585,15 +678,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 10,
-    minHeight: 250,
+    borderStyle: 'dashed',
+    borderWidth: 2,
+    borderColor: '#ddd',
   },
-  addProductIconContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#f2f2f2',
-    justifyContent: 'center',
-    alignItems: 'center',
+  addProductText: {
+    marginTop: 10,
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#999',
   },
   bottomActions: {
     position: 'absolute',
@@ -634,11 +727,11 @@ const styles = StyleSheet.create({
   },
   selectionCircle: {
     position: 'absolute',
-    bottom: 15,
-    right: 15,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    top: 10,
+    right: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: '#DDDDDD',
     backgroundColor: 'white',
@@ -651,9 +744,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
   },
   selectionDot: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
     backgroundColor: 'black',
   },
   selectionBottomBar: {
@@ -696,6 +789,30 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFEEEE',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  emptyStateContainer: {
+    width: '100%',
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  addFirstItemButton: {
+    backgroundColor: 'black',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+  },
+  addFirstItemButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '500',
   },
 });
 

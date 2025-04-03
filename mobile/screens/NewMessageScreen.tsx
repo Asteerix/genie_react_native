@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
   Text,
@@ -9,12 +10,15 @@ import {
   FlatList,
   SafeAreaView,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { useProfile, ProfileType } from '../context/ProfileContext';
+import { useMessaging } from '../context/MessagingContext';
+import { API_BASE_URL } from '../config';
 
 interface Friend {
   id: string;
@@ -40,33 +44,8 @@ const NewMessageScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const isTransferMode = mode === 'transfer';
-// Mock data for friends with balances for transfer mode
-const regularFriends: Friend[] = [
-  {
-    id: '10',
-    name: 'Audriana Toulet',
-    username: 'audrianatoulet',
-    avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait&aspect=1:1&seed=101',
-    status: 'En ligne',
-    balance: 0,
-  },
-  {
-    id: '11',
-    name: 'Johanna Toulet',
-    username: 'johannatoulet',
-    avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait&aspect=1:1&seed=102',
-    status: 'Hors ligne',
-    balance: 0,
-  },
-  {
-    id: '12',
-    name: 'Paul Marceau',
-    username: 'paulmarceau',
-    avatar: 'https://api.a0.dev/assets/image?text=man%20beard%20hat%20portrait&aspect=1:1&seed=103',
-    status: 'En ligne',
-    balance: 0,
-  },
-  ];
+  // Will fetch friends from API
+  const [regularFriends, setRegularFriends] = useState<Friend[]>([]);
   
   // Convert managed accounts to friend format for the list
   const managedAccountFriends: Friend[] = currentUser ? [
@@ -89,6 +68,76 @@ const regularFriends: Friend[] = [
       isManagedAccount: true
     }))
   ] : [];
+  
+  // Load friends from API on component mount
+  useEffect(() => {
+    const fetchContacts = async () => {
+      setIsLoading(true);
+      try {
+        // Fetch actual friends from the API using the correct endpoints
+        const response = await fetch(`${API_BASE_URL}/api/users/find-contacts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${await AsyncStorage.getItem('accessToken')}`
+          },
+          body: JSON.stringify({ phoneNumbers: [] }) // Empty list to get all contacts
+        });
+        if (!response.ok) {
+          throw new Error('Failed to fetch contacts');
+        }
+        
+        const data = await response.json();
+        
+        // Transform API data to match Friend interface
+        const friendsList = data.contacts ? data.contacts.map((contact: { id: string; name: string; username?: string; email?: string; avatar?: string; status?: string; balance?: number }) => ({
+          id: contact.id,
+          name: contact.name || '',
+          username: contact.username || contact.email || '',
+          avatar: contact.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(contact.name || '')}&background=random&color=fff`,
+          status: contact.status || 'En ligne',
+          balance: contact.balance || 0,
+        })) : [];
+        
+        setRegularFriends(friendsList);
+      } catch (error) {
+        console.error('Error fetching contacts:', error);
+        // Fallback to alternative endpoint if main contacts endpoint fails
+        try {
+          const token = await AsyncStorage.getItem('accessToken');
+          console.log('Using token for friends fallback:', token ? token.substring(0, 10) + '...' : 'No token');
+          const response = await fetch(`${API_BASE_URL}/api/friends`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          if (!response.ok) {
+            throw new Error('Failed to fetch friends');
+          }
+          
+          const data = await response.json();
+          const friendsList = data.friends ? data.friends.map((friend: { id: string; firstName: string; lastName: string; username?: string; email?: string; avatarUrl?: string; online?: boolean; balance?: number }) => ({
+            id: friend.id,
+            name: `${friend.firstName} ${friend.lastName}`,
+            username: friend.username || friend.email || '',
+            avatar: friend.avatarUrl || `https://api.a0.dev/assets/image?text=${encodeURIComponent(friend.firstName)}&aspect=1:1`,
+            status: friend.online ? 'En ligne' : 'Hors ligne',
+            balance: friend.balance || 0,
+          })) : [];
+          
+          setRegularFriends(friendsList);
+        } catch (fallbackError) {
+          console.error('Error fetching friends fallback:', fallbackError);
+          Alert.alert('Error', 'Failed to load contacts');
+          setRegularFriends([]);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchContacts();
+  }, []);
   
   // Combine managed accounts and regular friends based on mode
   const allContacts = isTransferMode
@@ -132,15 +181,14 @@ const regularFriends: Friend[] = [
     }
   };
 
-  const handleStartChat = () => {
+  const { createChat } = useMessaging();
+
+  const handleStartChat = async () => {
     if (selectedFriends.length === 0) return;
     
     setIsLoading(true);
     
-    // Simulate API request
-    setTimeout(() => {
-      setIsLoading(false);
-      
+    try {
       if (isTransferMode) {
         // Handle transfer mode - navigate to payment screen
         const recipient = selectedFriends[0];
@@ -156,7 +204,7 @@ const regularFriends: Friend[] = [
       } else {
         // Regular chat creation flow
         const isGroupChat = selectedFriends.length > 1;
-        const avatars = selectedFriends.map(friend => friend.avatar);
+        const participantIds = selectedFriends.map(friend => friend.id);
         
         // For group chat, use group name or generate from friend names
         let chatName = '';
@@ -166,15 +214,32 @@ const regularFriends: Friend[] = [
           chatName = selectedFriends[0].name;
         }
         
-        // Navigate to the chat screen
-        navigation.navigate('ChatDetail', {
-          messageId: Date.now().toString(),
-          name: chatName,
-          avatars,
-          isGroupChat,
-        });
+        // Create the chat using API
+        const chatType = isGroupChat ? 'group' : 'direct';
+        const chat = await createChat(chatType, participantIds, chatName);
+        
+        if (chat) {
+          // Get avatars for navigation
+          const avatars = selectedFriends.map(friend => friend.avatar);
+          
+          // Navigate to the chat screen
+          navigation.navigate('ChatDetail', {
+            messageId: chat.id,
+            name: chatName,
+            avatars,
+            isGroupChat,
+          });
+        } else {
+          // Handle error
+          Alert.alert('Error', 'Failed to create chat. Please try again.');
+        }
       }
-    }, 800);
+    } catch (error) {
+      console.error('Error creating chat:', error);
+      Alert.alert('Error', 'An error occurred. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const renderSelectedFriend = ({ item }: { item: Friend }) => (

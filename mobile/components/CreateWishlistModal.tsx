@@ -9,11 +9,15 @@ import {
   Animated,
   PanResponder,
   Dimensions,
-  Keyboard
+  Keyboard,
+  Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { toast } from 'sonner-native';
 import WishlistOptionalInfoModal from './WishlistOptionalInfoModal';
+import { RootStackParamList } from '../types/navigation';
 
 interface CreateWishlistModalProps {
   visible: boolean;
@@ -29,6 +33,7 @@ const CreateWishlistModal: React.FC<CreateWishlistModalProps> = ({
   onClose,
   onCreateWishlist
 }) => {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [wishlistTitle, setWishlistTitle] = useState('');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [showOptionalInfoModal, setShowOptionalInfoModal] = useState(false);
@@ -119,15 +124,35 @@ const CreateWishlistModal: React.FC<CreateWishlistModalProps> = ({
     setShowOptionalInfoModal(true);
   };
   
-  const handleOptionalInfoComplete = (data: { description: string; addAdmins: boolean }) => {
-    // Close optional info modal
-    setShowOptionalInfoModal(false);
-    
-    // Create wishlist with all data
-    onCreateWishlist(wishlistTitle, { description: data.description });
-    
-    // Close main modal
-    closeModal();
+  const handleOptionalInfoComplete = async (data: { description: string; addAdmins: boolean }) => {
+    try {
+      console.log('Finalizing wishlist data:', { title: wishlistTitle, description: data.description });
+      
+      // NE PAS créer la wishlist ici - c'est la responsabilité de WishlistSettingsScreen
+      
+      // Fermer d'abord le modal optionnel
+      setShowOptionalInfoModal(false);
+      
+      // Puis fermer le modal principal
+      closeModal();
+      
+      // Passer à l'écran de paramètres pour finaliser la wishlist
+      console.log('Navigating to WishlistSettings for final creation');
+      
+      // Naviguer vers l'écran de paramètres de la wishlist
+      // On passe les données de la wishlist à créer plus tard
+      navigation.navigate('WishlistSettings', {
+        pendingWishlist: {
+          title: wishlistTitle,
+          description: data.description,
+          addAdmins: data.addAdmins
+        }
+      });
+      
+    } catch (error) {
+      console.error('Error during navigation:', error);
+      toast.error('Erreur lors de la préparation de la liste');
+    }
   };
   
   if (!visible) return null;

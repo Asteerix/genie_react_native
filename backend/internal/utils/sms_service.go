@@ -3,7 +3,7 @@ package utils
 import (
 	"fmt"
 
-	"github.com/asteerix/auth-backend/internal/config"
+	"genie/internal/config"
 	"github.com/rs/zerolog/log"
 	"github.com/twilio/twilio-go"
 	twilioApi "github.com/twilio/twilio-go/rest/api/v2010"

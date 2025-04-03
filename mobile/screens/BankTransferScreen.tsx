@@ -93,10 +93,18 @@ const BankTransferScreen = () => {
         { text: "Annuler", style: "cancel" },
         { 
           text: "Confirmer", 
-          onPress: () => {
-            // En production, vous enverriez une requête à une API
-            // Pour l'instant, on simule un transfert réussi
-            setTimeout(() => {
+          onPress: async () => {
+            try {
+              // Afficher l'indicateur de chargement
+              const numericAmount = parseFloat(amount);
+              
+              // En production, il faudrait appeler une API backend réelle ici
+              // Par exemple:
+              // await API.transferToBank(account.id, numericAmount);
+              
+              // Simulation d'une attente réseau
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
               Alert.alert(
                 "Transfert effectué",
                 `Votre transfert de ${amount} € a été effectué avec succès.`,
@@ -108,7 +116,13 @@ const BankTransferScreen = () => {
                   }
                 }]
               );
-            }, 1000);
+            } catch (error) {
+              console.error("Erreur lors du transfert bancaire:", error);
+              Alert.alert(
+                "Erreur de transfert",
+                "Une erreur est survenue lors du transfert. Veuillez réessayer ou contacter le support."
+              );
+            }
           }
         }
       ]

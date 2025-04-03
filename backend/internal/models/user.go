@@ -18,6 +18,7 @@ type User struct {
 	BirthDate         time.Time            `bson:"birthDate,omitempty" json:"birthDate,omitempty"`
 	AvatarURL         string               `bson:"avatarUrl,omitempty" json:"avatarUrl,omitempty"`
 	ProfilePictureURL string               `bson:"profilePictureUrl,omitempty" json:"profilePictureUrl,omitempty"`
+	Balance           float64              `bson:"balance" json:"balance"`
 	ManagedAccounts   []primitive.ObjectID `bson:"managedAccounts,omitempty" json:"-"`
 	SocialAuth        []SocialAuth         `bson:"socialAuth,omitempty" json:"-"`
 	ResetToken        string               `bson:"resetToken,omitempty" json:"-"`
@@ -59,6 +60,7 @@ type UserResponse struct {
 	BirthDate         time.Time `json:"birthDate,omitempty"`
 	AvatarURL         string    `json:"avatarUrl,omitempty"`
 	ProfilePictureURL string    `json:"profilePictureUrl,omitempty"`
+	Balance           float64   `json:"balance"`
 	IsVerified        bool      `json:"isVerified"`
 	IsTwoFactorEnabled bool     `json:"isTwoFactorEnabled"`
 	CreatedAt         time.Time `json:"createdAt"`
@@ -78,6 +80,7 @@ func (u *User) ToResponse() UserResponse {
 		BirthDate:         u.BirthDate,
 		AvatarURL:         u.AvatarURL,
 		ProfilePictureURL: u.ProfilePictureURL,
+		Balance:           u.Balance,
 		IsVerified:        u.IsVerified,
 		IsTwoFactorEnabled: u.IsTwoFactorEnabled,
 		CreatedAt:         u.CreatedAt,

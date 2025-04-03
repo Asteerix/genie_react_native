@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,11 +10,13 @@ import {
   ScrollView,
   StatusBar,
   Platform,
+  Alert,
 } from 'react-native';
 import { Ionicons, FontAwesome, Feather } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
+import { useMessaging } from '../context/MessagingContext';
 
 // Types for the event chat
 interface Participant {
@@ -66,135 +68,111 @@ const EventChatScreen = () => {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [currentPhotoView, setCurrentPhotoView] = useState<Photo | null>(null);
 
-  // Mock data for conversations
-  const conversations: Conversation[] = [
-    {
-      id: '1',
-      title: 'Conversation Générale',
-      subtitle: 'Avec tous les invités',
-      isGeneral: true,
-      icon: '🎄',
-    },
-    {
-      id: '2',
-      title: 'Sans Noémie Sanchez',
-      subtitle: '',
-      isGeneral: false,
-      participants: [
+  // State for conversations loaded from API
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const { getEventChats } = useMessaging();
+  
+  // Load event chats from API
+  useEffect(() => {
+    const fetchEventChats = async () => {
+      try {
+        const chats = await getEventChats(eventId);
+        
+        // Convert API data to the format needed by the UI
+        if (chats) {
+          // Transform API data to match our UI format
+          const formattedChats: Conversation[] = chats.map(chat => {
+            // Set isGeneral based on if it's the main event chat
+            const isMainChat = chat.name?.toLowerCase().includes('general') || false;
+            
+            return {
+              id: chat.id,
+              title: chat.name || 'Chat',
+              subtitle: isMainChat ? 'Avec tous les invités' : '',
+              isGeneral: isMainChat,
+              // For non-general chats, we'd need to fetch excluded participants
+              // This would require backend support to know who is excluded
+              participants: []
+            };
+          });
+          
+          setConversations(formattedChats);
+        }
+      } catch (error) {
+        console.error('Error fetching event chats:', error);
+        // For now, add at least a general chat if API fails
+        setConversations([{
+          id: '1',
+          title: 'Conversation Générale',
+          subtitle: 'Avec tous les invités',
+          isGeneral: true,
+          icon: eventIcon,
+        }]);
+      }
+    };
+    
+    fetchEventChats();
+  }, [eventId]);
+
+  // Photos would come from a media service API
+  // Implemented as a placeholder until the API is available
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  
+  // Fetch event photos from API
+  useEffect(() => {
+    // Simulate loading photos from API
+    // In a real implementation, this would fetch from a photo/media service
+    const loadEventPhotos = async () => {
+      // Placeholder implementation - in production, replace with API call
+      setPhotos([
         {
           id: '1',
-          name: 'Noémie Sanchez',
-          avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20curly%20hair%20cartoon%20portrait&aspect=1:1&seed=123'
-        }
-      ]
-    },
-    {
-      id: '3',
-      title: 'Sans Audriana Toulet',
-      subtitle: '',
-      isGeneral: false,
-      participants: [
+          uri: 'https://images.unsplash.com/photo-1576919228236-a097c32a5cd4?q=80&w=500',
+          author: {
+            name: 'Event Member 1',
+            avatar: 'https://api.a0.dev/assets/image?text=Event%20Member&aspect=1:1&seed=101'
+          },
+          timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(), // 2 days ago
+          formattedTime: 'Il y a 2j'
+        },
         {
           id: '2',
-          name: 'Audriana Toulet',
-          avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait&aspect=1:1&seed=101'
+          uri: 'https://images.unsplash.com/photo-1543499459-d1460b154396?q=80&w=500',
+          author: {
+            name: 'Event Member 2',
+            avatar: 'https://api.a0.dev/assets/image?text=Event%20Member&aspect=1:1&seed=102'
+          },
+          timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1 day ago
+          formattedTime: 'Il y a 1j'
         }
-      ]
-    },
-    {
-      id: '4',
-      title: 'Sans Paul Marceau',
-      subtitle: '',
-      isGeneral: false,
-      participants: [
+      ]);
+    };
+    
+    loadEventPhotos();
+  }, [eventId]);
+
+  // Videos would also come from a media service API
+  // Implemented as a placeholder until the API is available
+  const [videos, setVideos] = useState<Video[]>([]);
+  
+  // Fetch event videos from API
+  useEffect(() => {
+    // Simulate loading videos from API
+    // In a real implementation, this would fetch from a video/media service
+    const loadEventVideos = async () => {
+      // Placeholder implementation - in production, replace with API call
+      setVideos([
         {
-          id: '3',
-          name: 'Paul Marceau',
-          avatar: 'https://api.a0.dev/assets/image?text=man%20beard%20hat%20portrait&aspect=1:1&seed=103'
+          id: '1',
+          thumbnailUri: 'https://images.unsplash.com/photo-1479722842840-c0a823bd0cd6?q=80&w=500',
+          title: `Highlights: ${eventTitle}`,
+          duration: '2:34'
         }
-      ]
-    }
-  ];
-
-  // Mock data for photos
-  const photos: Photo[] = [
-    {
-      id: '1',
-      uri: 'https://images.unsplash.com/photo-1576919228236-a097c32a5cd4?q=80&w=500',
-      author: {
-        name: 'Audriana Toulet',
-        avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait&aspect=1:1&seed=101'
-      },
-      timestamp: '2025-03-21T14:00:00',
-      formattedTime: 'Il y a 2j'
-    },
-    {
-      id: '2',
-      uri: 'https://images.unsplash.com/photo-1543499459-d1460b154396?q=80&w=500',
-      author: {
-        name: 'Paul Marceau',
-        avatar: 'https://api.a0.dev/assets/image?text=man%20beard%20hat%20portrait&aspect=1:1&seed=103'
-      },
-      timestamp: '2025-03-22T10:00:00',
-      formattedTime: 'Il y a 1j'
-    },
-    {
-      id: '3',
-      uri: 'https://images.unsplash.com/photo-1542262867-c4b517b92db8?q=80&w=500',
-      author: {
-        name: 'Noémie Sanchez',
-        avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20curly%20hair%20cartoon%20portrait&aspect=1:1&seed=123'
-      },
-      timestamp: '2025-03-22T16:00:00',
-      formattedTime: 'Il y a 1j'
-    },
-    {
-      id: '4',
-      uri: 'https://images.unsplash.com/photo-1603470207819-bd689838f4de?q=80&w=500',
-      author: {
-        name: 'Audriana Toulet',
-        avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait&aspect=1:1&seed=101'
-      },
-      timestamp: '2025-03-23T09:00:00',
-      formattedTime: 'Il y a 3h'
-    },
-    {
-      id: '5',
-      uri: 'https://images.unsplash.com/photo-1544387535-231077e7306c?q=80&w=500',
-      author: {
-        name: 'Paul Marceau',
-        avatar: 'https://api.a0.dev/assets/image?text=man%20beard%20hat%20portrait&aspect=1:1&seed=103'
-      },
-      timestamp: '2025-03-23T10:00:00',
-      formattedTime: 'Il y a 2h'
-    },
-    {
-      id: '6',
-      uri: 'https://images.unsplash.com/photo-1605974322329-eff36020e5b0?q=80&w=500',
-      author: {
-        name: 'Audriana Toulet',
-        avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait&aspect=1:1&seed=101'
-      },
-      timestamp: '2025-03-23T11:00:00',
-      formattedTime: 'Il y a 1h'
-    }
-  ];
-
-  // Mock data for videos
-  const videos: Video[] = [
-    {
-      id: '1',
-      thumbnailUri: 'https://images.unsplash.com/photo-1479722842840-c0a823bd0cd6?q=80&w=500',
-      title: 'Le meilleur de Noël 2024',
-      duration: '2:34'
-    },
-    {
-      id: '2',
-      thumbnailUri: 'https://images.unsplash.com/photo-1605974322329-eff36020e5b0?q=80&w=500',
-      title: 'Le beau sapin de Noël',
-      duration: '1:45'
-    }
-  ];
+      ]);
+    };
+    
+    loadEventVideos();
+  }, [eventId, eventTitle]);
 
   const handleBack = () => {
     navigation.goBack();

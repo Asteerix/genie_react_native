@@ -68,6 +68,8 @@ export interface ManagedAccount {
   gender?: string;
   birthDate?: string;
   avatarUrl?: string;
+  balance?: number;
+  username?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -77,6 +79,9 @@ export interface ManagedAccountCreateRequest {
   lastName: string;
   gender?: string;
   birthDate?: string;
+  avatarUrl?: string;
+  managedBy: string;
+  username?: string;
 }
 
 export interface ManagedAccountUpdateRequest {
@@ -97,6 +102,8 @@ export interface User {
   avatarUrl?: string;
   isVerified: boolean;
   twoFactorEnabled: boolean;
+  balance?: number;
+  username?: string;
   createdAt: string;
   updatedAt: string;
 }

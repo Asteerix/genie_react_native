@@ -129,8 +129,8 @@ func Load() (*Config, error) {
 		JWT: JWTConfig{
 			AccessSecret:        getEnv("JWT_ACCESS_SECRET", "access_secret_key"),
 			RefreshSecret:       getEnv("JWT_REFRESH_SECRET", "refresh_secret_key"),
-			AccessExpiryTime:    getDurationEnv("JWT_ACCESS_EXPIRY", 15*time.Minute),
-			RefreshExpiryTime:   getDurationEnv("JWT_REFRESH_EXPIRY", 30*24*time.Hour), // 30 jours
+			AccessExpiryTime:    getDurationEnv("JWT_ACCESS_EXPIRY", 30*24*time.Hour), // 30 jours pour mobile
+			RefreshExpiryTime:   getDurationEnv("JWT_REFRESH_EXPIRY", 90*24*time.Hour), // 90 jours
 			Issuer:              getEnv("JWT_ISSUER", "auth-app"),
 			AccessCookieName:    getEnv("JWT_ACCESS_COOKIE_NAME", "access_token"),
 			RefreshCookieName:   getEnv("JWT_REFRESH_COOKIE_NAME", "refresh_token"),

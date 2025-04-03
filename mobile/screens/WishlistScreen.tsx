@@ -1,30 +1,169 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  SafeAreaView, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  SafeAreaView,
   ScrollView,
   Image,
   Animated,
   Dimensions,
   Platform,
-  Pressable
+  Pressable,
+  ActivityIndicator,
+  RefreshControl,
+  FlatList // Importer FlatList
 } from 'react-native';
 import { Ionicons, FontAwesome, AntDesign, Feather, MaterialIcons } from '@expo/vector-icons';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { toast } from 'sonner-native';
 import BottomTabBar from '../components/BottomTabBar';
 import CreateWishlistModal from '../components/CreateWishlistModal';
+import SearchModal from '../components/SearchModal';
+import { useWishlist } from '../context/WishlistContext';
+import { RootStackParamList } from '../types/navigation';
+import {
+  WishlistType,
+  WishItemType,
+  getUserWishlists,
+  getUserWishItems,
+  getWishlistInvitations
+} from '../api/wishlists';
 
 const { width } = Dimensions.get('window');
 const cardWidth = (width - 60) / 2;
-
 const WishlistScreen = () => {
   const [activeTab, setActiveTab] = useState('listes');
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const navigation = useNavigation();
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  
+  // Handle pull-to-refresh with direct API call for better reliability
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    console.log('WishlistScreen - Pull-to-refresh triggered');
+    toast.info('Synchronisation directe des données...');
+    
+    try {
+      // Use direct API fetching for more reliable refresh
+      const apiData = await fetchDirectFromAPI();
+      console.log(`Pull-to-refresh: Données récupérées en ${apiData.responseTime}ms`);
+      
+      // Validate data was correctly retrieved
+      if (apiData.wishlists.length === 0 && wishlists.length > 0) {
+        console.warn('API returned 0 wishlists but context has data - possible API error');
+        toast.warning('Synchronisation partielle - vérification des données...');
+      }
+      
+      // Compare loaded data with what's in the context
+      console.log('Comparaison des données:');
+      console.log(`Context: ${wishlists.length} listes, ${wishItems.length} vœux`);
+      console.log(`API: ${apiData.wishlists.length} listes, ${apiData.items.length} vœux`);
+      
+      // Update the context with the fresh data
+      const refreshSuccess = await refreshAllData();
+      
+      if (refreshSuccess) {
+        toast.success(`Données synchronisées: ${apiData.wishlists.length} listes, ${apiData.items.length} vœux`);
+      } else {
+        toast.warning('Synchronisation terminée avec avertissements');
+      }
+    } catch (err: any) {
+      console.error('Erreur lors du pull-to-refresh:', err);
+      toast.error('Échec de la synchronisation directe');
+      
+      // Fall back to context refresh on error
+      console.log('Tentative de synchronisation via le contexte...');
+      await refreshAllData();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  const {
+    wishlists,
+    wishItems,
+    invitations,
+    isLoading,
+    error,
+    refreshWishlists,
+    refreshInvitations,
+    respondToWishlistInvitation,
+    editWishItem,
+    removeWishItem
+  } = useWishlist();
+  
+  // Fonction pour basculer l'état favori d'un voeu
+  const handleToggleFavorite = async (item: WishItemType) => {
+    try {
+      await editWishItem(item.id, {
+        isFavorite: !item.isFavorite
+      });
+      toast.success(item.isFavorite ? 'Retiré des favoris' : 'Ajouté aux favoris');
+    } catch (error) {
+      console.error('Erreur lors du changement de statut favori:', error);
+      toast.error('Impossible de modifier le statut favori');
+    }
+  };
+  
+  // Fonction pour supprimer un voeu
+  const handleDeleteWish = async (itemId: string) => {
+    try {
+      await removeWishItem(itemId);
+      toast.success('Vœu supprimé avec succès');
+    } catch (error) {
+      console.error('Erreur lors de la suppression du vœu:', error);
+      toast.error('Impossible de supprimer le vœu');
+    }
+  };
+  
+  // Helper function to refresh all wishlist data with timeout
+  const refreshAllData = async () => {
+    try {
+      console.log('WishlistScreen - Refreshing all wishlist data...');
+      
+      // Create promises with timeout to prevent hanging indefinitely
+      const timeoutDuration = 10000; // 10 seconds timeout
+      
+      const createPromiseWithTimeout = (promise: Promise<any>, name: string) => {
+        return Promise.race([
+          promise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`${name} request timed out after ${timeoutDuration}ms`)), timeoutDuration)
+          )
+        ]);
+      };
+      
+      // Fetch data with timeout protection
+      const refreshResults = await Promise.all([
+        createPromiseWithTimeout(refreshWishlists(), 'Wishlists'),
+        createPromiseWithTimeout(refreshInvitations(), 'Invitations')
+      ]);
+      
+      console.log('WishlistScreen - All data refreshed successfully');
+      console.log(`WishlistScreen - Received ${wishlists.length} wishlists`);
+      console.log(`WishlistScreen - Received ${wishItems.length} wish items`);
+      console.log(`WishlistScreen - Received ${invitations.length} invitations`);
+      
+      return refreshResults[0] && refreshResults[1]; // Both must succeed
+    } catch (err: any) {
+      console.error('WishlistScreen - Error refreshing data:', err);
+      console.error('WishlistScreen - Error message:', err.message);
+      
+      // Show more specific error message to the user based on error type
+      if (err.message && err.message.includes('timed out')) {
+        toast.error('La connexion à l\'API a expiré. Vérifiez votre connexion.');
+      } else if (err.response && err.response.status === 401) {
+        toast.error('Session expirée. Veuillez vous reconnecter.');
+      } else {
+        toast.error(`Erreur: ${err.message || 'Problème de connexion au serveur'}`);
+      }
+      
+      return false;
+    }
+  };
   
   // Animation values
   const tabIndicator = useRef(new Animated.Value(0)).current;
@@ -32,90 +171,48 @@ const WishlistScreen = () => {
   const wishesOpacity = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
-  // Mock data for products (vœux)
-  const products = [
-    {
-      id: 'p1',
-      name: 'Ceinture Diesel',
-      price: '129 €',
-      image: 'https://api.a0.dev/assets/image?text=black%20leather%20belt%20with%20silver%20buckle&aspect=1:1&seed=123',
-      isFavorite: true
-    },
-    {
-      id: 'p2',
-      name: 'Lego Star Wars',
-      price: '129.95 €',
-      image: 'https://api.a0.dev/assets/image?text=lego%20star%20wars%20millennium%20falcon%20set&aspect=1:1&seed=456',
-      isFavorite: false
-    },
-    {
-      id: 'p3',
-      name: 'Nike Chaussettes de sport',
-      price: '189.99 €',
-      image: 'https://api.a0.dev/assets/image?text=green%20sports%20car%20lego%20technic&aspect=1:1&seed=789',
-      isFavorite: false
-    },
-    {
-      id: 'p4',
-      name: 'Nike Chaussettes de sport',
-      price: '24.90 €',
-      image: 'https://api.a0.dev/assets/image?text=white%20sport%20socks%20pair&aspect=1:1&seed=101112',
-      isFavorite: false
-    },
-    {
-      id: 'p5',
-      name: 'Nike Chaussettes de sport',
-      price: '129.95 €',
-      image: 'https://api.a0.dev/assets/image?text=nike%20dunk%20low%20black%20white%20sneakers&aspect=1:1&seed=131415',
-      isFavorite: false
-    }
-  ];
-
-  // Mock data for wishlists
-  const wishlists = [
-    {
-      id: '1',
-      type: 'invitation',
-      title: 'Vacances Wishlist',
-      invitedBy: 'audrianatoulet',
-      message: 'vous invite sur une liste',
-      image: 'https://api.a0.dev/assets/image?text=tropical%20beach%20vacation%20paradise&aspect=1:1&seed=123',
-      avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20profile%20portrait&aspect=1:1&seed=456'
-    },
-    {
-      id: '2',
-      type: 'list',
-      title: 'Mes favoris',
-      description: 'Ma liste de favoris du moment',
-      image: 'https://api.a0.dev/assets/image?text=coffee%20beans%20different%20varieties&aspect=1:1&seed=789',
-      isFavorite: true
-    },
-    {
-      id: '3',
-      type: 'list',
-      title: 'Hivers 2024',
-      description: 'Ma liste pour cet hivers 2024',
-      image: 'https://api.a0.dev/assets/image?text=winter%20collage%20with%20snowflakes&aspect=1:1&seed=101112',
-      isFavorite: true
-    },
-    {
-      id: '4',
-      type: 'list',
-      title: 'Pour mon annif\'',
-      description: 'Pour le 5 septembre',
-      image: 'https://api.a0.dev/assets/image?text=birthday%20cake%20with%20unicorn&aspect=1:1&seed=131415',
-      isFavorite: false
-    },
-    {
-      id: '5',
-      type: 'list',
-      title: 'Vacances Wishlist',
-      description: 'Les choses à acheter pour les vacances',
-      image: 'https://api.a0.dev/assets/image?text=tropical%20beach%20vacation%20paradise&aspect=1:1&seed=123',
-      avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20profile%20portrait&aspect=1:1&seed=456',
-      isFavorite: false
-    },
-  ];
+  // Charger les données au montage et gérer les chargements et erreurs
+  useEffect(() => {
+    let isMounted = true;
+    const loadData = async () => {
+      try {
+        console.log('WishlistScreen - Loading data from API...');
+        
+        // Afficher un toast pour informer l'utilisateur du chargement
+        toast.info('Chargement des listes et vœux depuis l\'API...');
+        
+        // Appel unique au refreshWishlists du contexte
+        if (isMounted) {
+          // Le contexte gère déjà l'état de chargement
+          const success = await refreshWishlists();
+          
+          // Ne faire une deuxième requête que si nécessaire et si le composant est toujours monté
+          if (isMounted) {
+            if (success) {
+              console.log('WishlistScreen - Data loaded successfully via context');
+              toast.success('Données chargées avec succès');
+            } else {
+              toast.error('Problème lors du chargement des données');
+            }
+            
+            await refreshInvitations();
+          }
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          console.error('WishlistScreen - Error loading data:', err);
+          toast.error(`Erreur: ${err.message || 'Problème de connexion à l\'API'}`);
+        }
+      }
+    };
+    
+    loadData();
+    
+    // Cleanup function to prevent state updates if component unmounts during data fetch
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Tab switching animation
   useEffect(() => {
@@ -162,41 +259,106 @@ const WishlistScreen = () => {
     }).start();
   };
 
-  const renderInvitationCard = (wishlist) => (
-    <Animated.View 
-      style={[styles.invitationCard, { transform: [{ scale: scaleAnim }] }]} 
-      key={wishlist.id}
-    >
-      <View style={styles.cardContent}>
-        <Image source={{ uri: wishlist.image }} style={styles.wishlistImage} />
-        <View style={styles.avatarContainer}>
-          <Image source={{ uri: wishlist.avatar }} style={styles.avatarImage} />
-        </View>
-        <View style={styles.invitationInfo}>
-          <Text style={styles.wishlistTitle}>{wishlist.title} <Ionicons name="chevron-forward" size={16} color="#888" /></Text>
-          <Text style={styles.invitationText}>
-            <Text style={styles.invitedBy}>{wishlist.invitedBy}</Text> {wishlist.message}
-          </Text>
-        </View>
-      </View>
-      <View style={styles.invitationActions}>
-        <TouchableOpacity 
-          style={styles.rejectButton}
-          activeOpacity={0.7}
-        >
-          <AntDesign name="close" size={24} color="red" />
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.acceptButton}
-          activeOpacity={0.7}
-        >
-          <AntDesign name="check" size={24} color="green" />
-        </TouchableOpacity>
-      </View>
-    </Animated.View>
-  );
+  // Gérer la création d'une nouvelle wishlist - maintenant toujours via le modal WishlistOptionalInfoModal
+  const handleCreateWishlist = async (title: string, options?: { description?: string, addAdmins?: boolean }) => {
+    try {
+      console.log('WishlistScreen - Preparing wishlist creation:', title, options);
+      
+      // On passe toujours par le modal WishlistOptionalInfoModal pour finaliser la création
+      // C'est dans ce modal qu'on enregistrera réellement la wishlist
+      setShowCreateModal(false);
+      
+      // Naviguer vers l'écran de paramètres avec les données de la wishlist à créer
+      navigation.navigate('WishlistSettings', {
+        pendingWishlist: {
+          title,
+          description: options?.description || '',
+          addAdmins: options?.addAdmins || false
+        }
+      });
+    } catch (error) {
+      console.error("WishlistScreen - Error preparing wishlist creation:", error);
+      toast.error("Impossible de préparer la création de la wishlist");
+    }
+  };
 
-  const renderWishlistCard = (wishlist) => (
+  // Gérer l'acceptation d'une invitation
+  const handleAcceptInvitation = async (wishlistId: string) => {
+    try {
+      await respondToWishlistInvitation(wishlistId, true);
+      refreshWishlists();
+    } catch (error) {
+      console.error("Erreur lors de l'acceptation de l'invitation:", error);
+      toast.error("Impossible d'accepter l'invitation");
+    }
+  };
+
+  // Gérer le refus d'une invitation
+  const handleRejectInvitation = async (wishlistId: string) => {
+    try {
+      await respondToWishlistInvitation(wishlistId, false);
+      refreshWishlists();
+    } catch (error) {
+      console.error("Erreur lors du refus de l'invitation:", error);
+      toast.error("Impossible de refuser l'invitation");
+    }
+  };
+
+  const renderInvitationCard = (wishlist: WishlistType) => {
+    // Récupérer l'info de l'utilisateur qui invite
+    const owner = wishlist.sharedWith?.find(share => share.userId === wishlist.userId)?.user;
+    const invitedBy = owner ? `${owner.firstName} ${owner.lastName}` : "Utilisateur";
+    
+    return (
+      <Animated.View 
+        style={[styles.invitationCard, { transform: [{ scale: scaleAnim }] }]} 
+        key={wishlist.id}
+      >
+        <View style={styles.cardContent}>
+          <Image 
+            source={{ 
+              uri: wishlist.coverImage || 'https://api.a0.dev/assets/image?text=wishlist&aspect=1:1'
+            }} 
+            style={styles.wishlistImage} 
+          />
+          <View style={styles.avatarContainer}>
+            <Image 
+              source={{ 
+                uri: owner?.avatarUrl || 'https://api.a0.dev/assets/image?text=user&aspect=1:1'
+              }} 
+              style={styles.avatarImage} 
+            />
+          </View>
+          <View style={styles.invitationInfo}>
+            <Text style={styles.wishlistTitle}>
+              {wishlist.title} <Ionicons name="chevron-forward" size={16} color="#888" />
+            </Text>
+            <Text style={styles.invitationText}>
+              <Text style={styles.invitedBy}>{invitedBy}</Text> vous invite sur une liste
+            </Text>
+          </View>
+        </View>
+        <View style={styles.invitationActions}>
+          <TouchableOpacity 
+            style={styles.rejectButton}
+            activeOpacity={0.7}
+            onPress={() => handleRejectInvitation(wishlist.id)}
+          >
+            <AntDesign name="close" size={24} color="red" />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.acceptButton}
+            activeOpacity={0.7}
+            onPress={() => handleAcceptInvitation(wishlist.id)}
+          >
+            <AntDesign name="check" size={24} color="green" />
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+    );
+  };
+
+  const renderWishlistCard = (wishlist: WishlistType) => (
     <Pressable 
       style={styles.wishlistCard} 
       key={wishlist.id}
@@ -206,15 +368,15 @@ const WishlistScreen = () => {
       android_ripple={{ color: '#f0f0f0', borderless: false }}
     >
       <View style={styles.wishlistImageContainer}>
-        <Image source={{ uri: wishlist.image }} style={styles.wishlistImage} />
+        <Image 
+          source={{ 
+            uri: wishlist.coverImage || 'https://api.a0.dev/assets/image?text=wishlist&aspect=1:1'
+          }} 
+          style={styles.wishlistImage} 
+        />
         {wishlist.isFavorite && (
           <View style={styles.favoriteTag}>
             <AntDesign name="star" size={16} color="black" />
-          </View>
-        )}
-        {wishlist.avatar && (
-          <View style={styles.avatarContainer}>
-            <Image source={{ uri: wishlist.avatar }} style={styles.avatarImage} />
           </View>
         )}
       </View>
@@ -226,52 +388,230 @@ const WishlistScreen = () => {
     </Pressable>
   );
 
-  const renderProductCard = (product, index) => (
+  const renderProductCard = (item: WishItemType) => (
     <Pressable
-      key={product.id}
+      key={item.id}
       style={styles.productCard}
-      onPress={() => navigation.navigate('ProductDetail', { productId: product.id })}
+      onPress={() => navigation.navigate('ProductDetail', { productId: item.id })}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       android_ripple={{ color: '#f0f0f0', borderless: false }}
     >
       <View style={styles.productImageContainer}>
-        <Image source={{ uri: product.image }} style={styles.productImage} />
-        {product.isFavorite && (
-          <View style={styles.favoriteTag}>
-            <AntDesign name="star" size={16} color="black" />
+        <Image
+          source={{
+            uri: item.imageUrl || item.imageURL || 'https://api.a0.dev/assets/image?text=product&aspect=1:1'
+          }}
+          style={styles.productImage}
+          resizeMode="cover"
+        />
+        <TouchableOpacity
+          style={styles.wishFavoriteButton}
+          onPress={() => handleToggleFavorite(item)}
+          hitSlop={{top: 15, bottom: 15, left: 15, right: 15}}
+        >
+          <View style={[styles.wishFavoriteTag, item.isFavorite ? styles.favoriteActive : {}]}>
+            <AntDesign name="star" size={16} color={item.isFavorite ? "black" : "gray"} />
           </View>
-        )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => handleDeleteWish(item.id)}
+          hitSlop={{top: 15, bottom: 15, left: 15, right: 15}}
+        >
+          <Ionicons name="trash-outline" size={18} color="white" />
+        </TouchableOpacity>
       </View>
       <View style={styles.productInfo}>
-        <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
+        <Text style={styles.productName} numberOfLines={1}>{item.name}</Text>
         <View style={styles.priceAndButtonContainer}>
-          <Text style={styles.productPrice}>{product.price}</Text>
-          <TouchableOpacity 
+          <Text style={styles.productPrice}>
+            {item.price ? `${item.price} ${item.currency || '€'}` : ''}
+          </Text>
+          <TouchableOpacity
             style={styles.productButton}
             activeOpacity={0.8}
-            onPress={() => navigation.navigate('ProductDetail', { productId: product.id })}
+            onPress={() => navigation.navigate('ProductDetail', { productId: item.id })}
           >
-            <Ionicons name="arrow-forward" size={20} color="white" />
+            <Ionicons name="eye-outline" size={18} color="white" />
           </TouchableOpacity>
         </View>
       </View>
     </Pressable>
   );
 
+  // Implement a function to directly fetch data from API
+  const fetchDirectFromAPI = async () => {
+    try {
+      console.log('WishlistScreen - Fetching directly from API...');
+      toast.info('Récupération directe depuis l\'API...');
+      
+      // Start timer to measure API performance
+      const startTime = Date.now();
+      
+      // Get data directly from API with Promise.all for parallel requests
+      const results = await Promise.all([
+        getUserWishlists(),
+        getUserWishItems(),
+        getWishlistInvitations()
+      ]);
+      
+      const endTime = Date.now();
+      const responseTime = endTime - startTime;
+      
+      const [directWishlists, directItems, directInvitations] = results;
+      
+      console.log(`WishlistScreen - API Response (${responseTime}ms): ` +
+        `${directWishlists.length} wishlists, ${directItems.length} items, ${directInvitations.length} invitations`);
+      
+      // Log detailed information about received data
+      console.log('===== DÉTAILS SYNCHRONISATION API =====');
+      console.log(`Wishlists: ${JSON.stringify(directWishlists.map(w => ({ id: w.id, title: w.title })))}`);
+      console.log(`Items: ${JSON.stringify(directItems.map(i => ({ id: i.id, name: i.name })))}`);
+      console.log(`Invitations: ${JSON.stringify(directInvitations.map(i => ({ id: i.id, title: i.title })))}`);
+      console.log('======================================');
+      
+      // Force context refresh to update state with new data
+      toast.success(`API: ${directWishlists.length} listes, ${directItems.length} vœux récupérés`);
+      
+      // Return the results for potential further processing
+      return {
+        wishlists: directWishlists,
+        items: directItems,
+        invitations: directInvitations,
+        responseTime
+      };
+    } catch (err: any) {
+      console.error('WishlistScreen - Error fetching directly from API:', err);
+      toast.error(`Erreur API: ${err.message || 'Problème de connexion'}`);
+      throw err;
+    }
+  };
+  
+  // Récupérer addWishlist du contexte
+  const { addWishlist } = useWishlist();
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Mes vœux</Text>
+          <TouchableOpacity
+            style={styles.headerButton}
+            activeOpacity={0.7}
+            onPress={async () => {
+              toast.info('Nouvelle tentative...');
+              await refreshAllData();
+            }}
+          >
+            <Ionicons name="refresh" size={28} color="black" />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#000" />
+          <Text style={styles.loadingText}>Chargement des données...</Text>
+          <Text style={styles.loadingSubtext}>Récupération des listes et des vœux depuis l'API</Text>
+          <Text style={[styles.loadingSubtext, {marginTop: 15, fontStyle: 'italic'}]}>
+            Connexion à l'API pour synchroniser les wishlists et les souhaits
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Mes vœux</Text>
         <View style={styles.headerActions}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.headerButton}
             activeOpacity={0.7}
-            onPress={() => navigation.navigate('Search')}
+            onPress={async () => {
+              toast.info('Actualisation des données...');
+              const success = await refreshAllData();
+              if (success) {
+                toast.success('Données actualisées');
+              } else {
+                toast.error('Erreur d\'actualisation');
+              }
+            }}
+          >
+            <Ionicons name="refresh" size={28} color="black" />
+          </TouchableOpacity>
+          
+          {/* Sync button - press to synchronize data directly from API */}
+          <TouchableOpacity
+            style={styles.headerButton}
+            activeOpacity={0.7}
+            onPress={async () => {
+              try {
+                console.log('====== SYNCHRONISATION DIRECTE AVEC L\'API ======');
+                toast.info('Synchronisation avec l\'API en cours...');
+                
+                // Use our dedicated function to fetch directly from API
+                const apiData = await fetchDirectFromAPI();
+                
+                // Log performance metrics
+                console.log(`API Performance: ${apiData.responseTime}ms response time`);
+                console.log(`API Résultats: ${apiData.wishlists.length} listes, ${apiData.items.length} vœux, ${apiData.invitations.length} invitations`);
+                
+                // Validate data integrity
+                const hasWishlistData = apiData.wishlists.length > 0;
+                const hasWishItemsData = apiData.items.length > 0;
+                const hasInvitationsData = apiData.invitations.length > 0;
+                
+                // Update the context with fresh data
+                if (hasWishlistData || hasWishItemsData || hasInvitationsData) {
+                  console.log('Données récupérées, mise à jour du contexte...');
+                  
+                  // Using refreshAllData to ensure context state is updated
+                  const refreshSuccess = await refreshAllData();
+                  
+                  if (refreshSuccess) {
+                    toast.success(`Synchronisé: ${apiData.wishlists.length} listes, ${apiData.items.length} vœux, ${apiData.invitations.length} invitations`);
+                  } else {
+                    toast.warning('Synchronisation terminée avec avertissements');
+                  }
+                } else {
+                  // No data found - could be empty or API issue
+                  console.log('Aucune donnée reçue de l\'API - vérification...');
+                  
+                  if (apiData.responseTime < 200) {
+                    // Suspiciously fast response might indicate API issue
+                    toast.warning('Réponse API anormale - essai de recharger via le contexte');
+                    await refreshAllData();
+                  } else {
+                    toast.info('Aucune donnée trouvée sur l\'API');
+                  }
+                }
+                
+                console.log('====== FIN SYNCHRONISATION DIRECTE ======');
+              } catch (err: any) {
+                console.error('Erreur lors de la synchronisation API directe:', err);
+                toast.error(`Erreur API: ${err.message}`);
+                
+                // Try fallback to context refresh
+                try {
+                  toast.info('Tentative de récupération via le contexte...');
+                  await refreshAllData();
+                } catch (fallbackErr) {
+                  console.error('Échec de la récupération via le contexte:', fallbackErr);
+                }
+              }
+            }}
+          >
+            <MaterialIcons name="sync" size={26} color="#555" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={styles.headerButton}
+            activeOpacity={0.7}
+            onPress={() => setShowSearchModal(true)}
           >
             <Ionicons name="search" size={28} color="black" />
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.headerButton}
             activeOpacity={0.7}
             onPress={() => setShowCreateModal(true)}
@@ -318,55 +658,161 @@ const WishlistScreen = () => {
         </TouchableOpacity>
       </View>
       
-      <ScrollView 
-        style={styles.content} 
+      <ScrollView
+        style={styles.content}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={['#000']}
+            tintColor={'#000'}
+            title={'Synchronisation...'}
+            titleColor={'#999'}
+          />
+        }
       >
         {/* Lists Tab */}
-        <Animated.View 
-          style={[
-            styles.tabContent,
-            { opacity: listOpacity, display: activeTab === 'listes' ? 'flex' : 'none' }
-          ]}
-        >
-          {wishlists.map(wishlist => 
-            wishlist.type === 'invitation' 
-              ? renderInvitationCard(wishlist) 
-              : renderWishlistCard(wishlist)
-          )}
-        </Animated.View>
+        {/* Utiliser un seul FlatList pour les invitations et les wishlists */}
+        {activeTab === 'listes' && (
+          <Animated.View style={[styles.tabContent, { opacity: listOpacity }]}>
+            <FlatList
+              data={[...invitations, ...wishlists]} // Combiner les deux listes
+              renderItem={({ item }) => {
+                // Déterminer si c'est une invitation ou une wishlist standard
+                // On peut se baser sur une propriété unique aux invitations si elle existe,
+                // ou sur le fait qu'elle est dans la liste 'invitations' (moins propre ici)
+                // Pour cet exemple, on suppose qu'une invitation a un statut spécifique ou manque une propriété
+                // Ici, on va juste vérifier si l'item existe dans la liste originale des invitations
+                const isInvitation = invitations.some(inv => inv.id === item.id);
+                if (isInvitation) {
+                  return renderInvitationCard(item);
+                } else {
+                  return renderWishlistCard(item);
+                }
+              }}
+              keyExtractor={(item) => item.id}
+              ListEmptyComponent={
+                // Afficher le message d'état vide seulement si les deux listes sont vides
+                invitations.length === 0 && wishlists.length === 0 ? (
+                  <View style={styles.emptyStateContainer}>
+                    <Text style={styles.emptyStateText}>
+                      {error ? 'Erreur de chargement des données' : 'Vous n\'avez pas encore de listes de souhaits'}
+                    </Text>
+                    {error ? (
+                      <TouchableOpacity
+                        style={styles.retryButton}
+                        onPress={async () => {
+                          toast.info('Nouvelle tentative de chargement...');
+                          const success = await refreshAllData();
+                          if (success) {
+                            toast.success('Données actualisées');
+                          } else {
+                            toast.error('Échec du chargement');
+                          }
+                        }}
+                      >
+                        <Ionicons name="refresh" size={20} color="white" style={{ marginRight: 8 }} />
+                        <Text style={styles.createButtonText}>Réessayer</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.createButton}
+                        onPress={() => setShowCreateModal(true)}
+                      >
+                        <Text style={styles.createButtonText}>Créer une liste</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ) : null // Ne rien afficher si au moins une liste n'est pas vide
+              }
+              // Ajouter d'autres props FlatList si nécessaire (initialNumToRender, etc.)
+            />
+          </Animated.View>
+        )}
+          
+        {/* Le composant ListEmptyComponent gère maintenant l'état vide */}
         
         {/* Wishes Tab */}
-        <Animated.View 
-          style={[
-            styles.tabContent,
-            { opacity: wishesOpacity, display: activeTab === 'voeux' ? 'flex' : 'none' }
-          ]}
-        >
-          <View style={styles.productsGrid}>
-            {products.map((product, index) => renderProductCard(product, index))}
-            <TouchableOpacity 
-              style={styles.addProductCard}
-              activeOpacity={0.7}
-            >
-              <View style={styles.addProductIconContainer}>
-                <Feather name="plus" size={40} color="#999" />
-              </View>
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
+        {/* Utiliser FlatList pour l'onglet Vœux */}
+        {activeTab === 'voeux' && (
+          <Animated.View style={[styles.tabContent, { opacity: wishesOpacity }]}>
+            <FlatList
+              data={wishItems} // Utiliser les données des vœux
+              renderItem={({ item }) => renderProductCard(item)} // Utiliser la fonction de rendu existante
+              keyExtractor={(item) => item.id}
+              numColumns={2} // Afficher en grille de 2 colonnes
+              columnWrapperStyle={styles.productsGridColumnWrapper} // Style pour l'espacement entre colonnes
+              // ListHeaderComponent est supprimé pour ne plus afficher la carte "Créer un vœu" en permanence
+              ListEmptyComponent={ // Afficher si la liste des vœux est vide (après le bouton créer)
+                wishItems.length === 0 ? (
+                   <View style={styles.emptyStateContainer}>
+                     <Text style={styles.emptyStateText}>
+                       {error ? 'Erreur de chargement des vœux' : 'Vous n\'avez pas encore de vœux'}
+                     </Text>
+                     {error ? (
+                       <TouchableOpacity
+                         style={styles.retryButton}
+                         onPress={async () => {
+                           toast.info('Nouvelle tentative de chargement...');
+                           const success = await refreshAllData();
+                           if (success) {
+                             toast.success('Données actualisées');
+                           } else {
+                             toast.error('Échec du chargement');
+                           }
+                         }}
+                       >
+                         <Ionicons name="refresh" size={20} color="white" style={{ marginRight: 8 }} />
+                         <Text style={styles.createButtonText}>Réessayer</Text>
+                       </TouchableOpacity>
+                     ) : (
+                       <TouchableOpacity
+                         style={styles.createButton} // Utilise le même style que "Créer une liste"
+                         activeOpacity={0.7}
+                         onPress={() => {
+                           if (wishlists.length > 0) {
+                             const defaultWishlistId = wishlists[0]?.id;
+                             if (defaultWishlistId) {
+                               navigation.navigate('AddWish', { wishlistId: defaultWishlistId });
+                             } else {
+                               toast.error("Impossible de trouver une liste par défaut.");
+                               setActiveTab('listes');
+                               setShowCreateModal(true);
+                             }
+                           } else {
+                             toast.info("Créez d'abord une liste de souhaits");
+                             setActiveTab('listes');
+                             setShowCreateModal(true);
+                           }
+                         }}
+                       >
+                         <Text style={styles.createButtonText}>Créer un vœu</Text>
+                       </TouchableOpacity>
+                     )}
+                   </View>
+                ) : null
+              }
+              // Ajouter d'autres props FlatList si nécessaire
+            />
+          </Animated.View>
+        )}
+            
+        {/* Le composant ListEmptyComponent gère maintenant l'état vide */}
       </ScrollView>
       
       {/* Create Wishlist Modal */}
       <CreateWishlistModal
         visible={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        onCreateWishlist={(title) => {
-          console.log('Nouvelle liste créée:', title);
-          toast.success(`Liste "${title}" créée avec succès`);
-          setShowCreateModal(false);
-        }}
+        onCreateWishlist={handleCreateWishlist}
+      />
+      
+      {/* Modal de recherche */}
+      <SearchModal
+        visible={showSearchModal}
+        onClose={() => setShowSearchModal(false)}
       />
       
       {/* Bottom navigation bar */}
@@ -574,39 +1020,41 @@ const styles = StyleSheet.create({
   chevronIcon: {
     paddingLeft: 10,
   },
-  productsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingVertical: 10
+  // Style pour FlatList numColumns=2
+  productsGridColumnWrapper: {
+    justifyContent: 'space-between', // Espace entre les colonnes
   },
   productCard: {
-    width: '48%',
+    width: cardWidth, // Utiliser la largeur calculée
+    height: cardWidth + 60, // Ajuster la hauteur pour le texte
     backgroundColor: '#fff',
     borderRadius: 16,
     marginBottom: 15,
+    // marginHorizontal n'est plus nécessaire avec columnWrapperStyle
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 3,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4,
   },
   productImageContainer: {
     position: 'relative',
-    height: 150
+    height: '60%', // 60% de la hauteur pour l'image
+    width: '100%',
   },
   productImage: {
     width: '100%',
     height: '100%',
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
+    backgroundColor: '#f3f3f3', // Couleur de fond pendant le chargement
   },
-  favoriteTag: {
+  wishFavoriteTag: {
     position: 'absolute',
     top: 10,
-    left: 10,
-    backgroundColor: '#FFD700',
+    right: 10,
+    backgroundColor: '#f5f5f5',
     borderRadius: 12,
     width: 24,
     height: 24,
@@ -619,13 +1067,38 @@ const styles = StyleSheet.create({
     shadowRadius: 1,
     elevation: 2,
   },
+  wishFavoriteButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 2,
+  },
+  favoriteActive: {
+    backgroundColor: '#FFD700',
+  },
+  deleteButton: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    backgroundColor: 'rgba(255, 59, 48, 0.8)',
+    borderRadius: 12,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
   productInfo: {
-    padding: 12,
+    padding: 10,
+    paddingTop: 5,
+    height: '40%', // 40% restant pour les infos produit
+    justifyContent: 'space-between',
   },
   productName: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
-    marginBottom: 10,
+    marginBottom: 5,
+    height: 20,
   },
   priceAndButtonContainer: {
     flexDirection: 'row',
@@ -665,6 +1138,88 @@ const styles = StyleSheet.create({
     backgroundColor: '#f2f2f2',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 20,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  loadingSubtext: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#777',
+    textAlign: 'center',
+    maxWidth: '80%',
+  },
+  emptyStateContainer: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 200,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  createButton: {
+    backgroundColor: '#000',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#3366ff',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  createWishCard: {
+    // Style pour le bouton "Créer un vœu" en tête de la FlatList
+    width: '100%', // Prend toute la largeur
+    height: 100, // Hauteur fixe ou dynamique
+    borderRadius: 16,
+    marginBottom: 15,
+    backgroundColor: '#f9f9f9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  createWishIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#f2f2f2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  createWishText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
   }
 });
 

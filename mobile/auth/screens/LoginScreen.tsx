@@ -1,4 +1,4 @@
-import React, { useState, useCallback, memo } from 'react';
+import React, { useState, useCallback, memo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,8 @@ import {
   TextInput,
   Dimensions,
   StatusBar,
-  ActivityIndicator
+  ActivityIndicator,
+  Alert
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -144,27 +145,71 @@ type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, '
 const LoginScreen: React.FC = () => {
   const [emailOrPhone, setEmailOrPhone] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [checkingUser, setCheckingUser] = useState(false);
   const { signIn, isLoading, checkUserExists } = useAuth();
+  
+  // Pas de pré-remplissage en production
   const navigation = useNavigation<LoginScreenNavigationProp>();
   
+  // Fonction pour valider le format de l'email
+  const isValidEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+  
+  // Fonction pour valider le format du téléphone
+  const isValidPhone = (phone: string): boolean => {
+    // Format simple pour les numéros de téléphone
+    const phoneRegex = /^\+?[0-9]{8,15}$/;
+    return phoneRegex.test(phone);
+  };
+  
+  // Validation de l'entrée
+  const validateInput = (input: string): boolean => {
+    if (!input.trim()) {
+      toast.error('Veuillez entrer un email ou un numéro de téléphone');
+      return false;
+    }
+    
+    if (!isValidEmail(input) && !isValidPhone(input)) {
+      toast.error('Format d\'email ou de téléphone invalide');
+      return false;
+    }
+    
+    return true;
+  };
+  
   const handleContinue = useCallback(async () => {
-    if (!emailOrPhone.trim()) return;
-
+    if (!validateInput(emailOrPhone)) return;
+    
     try {
-      const userExists = await checkUserExists(emailOrPhone);
+      setCheckingUser(true);
       
-      if (userExists) {
+      // Appel à l'API pour vérifier si l'utilisateur existe
+      const response = await checkUserExists(emailOrPhone);
+      
+      setCheckingUser(false);
+      
+      console.log(`Vérification de l'email ${emailOrPhone}: ${response.exists ? 'existe' : 'n\'existe pas'}`);
+      
+      if (response.exists) {
+        // Si l'utilisateur existe, rediriger vers la page de connexion
+        // Pas de toast pour ne pas perturber l'expérience utilisateur
         navigation.navigate('ExistingUserPassword', { emailOrPhone });
       } else {
+        // Si l'utilisateur n'existe pas, rediriger vers la page d'inscription
+        // Pas de toast pour ne pas perturber l'expérience utilisateur
         navigation.navigate('SignupPassword', { emailOrPhone });
       }
     } catch (error) {
+      setCheckingUser(false);
+      
       if (error instanceof Error) {
         toast.error(error.message);
       } else {
-        toast.error('Une erreur est survenue');
+        toast.error('Une erreur est survenue lors de la vérification');
       }
-      console.error(error);
+      // Erreur silencieuse de vérification
     }
   }, [emailOrPhone, checkUserExists, navigation]);
 
@@ -227,14 +272,19 @@ const LoginScreen: React.FC = () => {
           <TouchableOpacity 
             style={[
               styles.continueButton,
-              (!emailOrPhone.trim() || isLoading) && styles.disabledButton
+              (!emailOrPhone.trim() || isLoading || checkingUser) && styles.disabledButton
             ]} 
             onPress={handleContinue}
-            disabled={!emailOrPhone.trim() || isLoading}
+            disabled={!emailOrPhone.trim() || isLoading || checkingUser}
             activeOpacity={0.9}
           >
-            {isLoading ? (
-              <ActivityIndicator size="small" color="black" />
+            {isLoading || checkingUser ? (
+              <View style={styles.buttonContentRow}>
+                <ActivityIndicator size="small" color="black" />
+                <Text style={[styles.continueButtonText, {marginLeft: 10}]}>
+                  {checkingUser ? "Vérification..." : "Chargement..."}
+                </Text>
+              </View>
             ) : (
               <Text style={styles.continueButtonText}>Continuer</Text>
             )}
@@ -255,6 +305,11 @@ const styles = StyleSheet.create({
   keyboardView: {
     flex: 1,
     width: '100%',
+  },
+  buttonContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   header: {
     flexDirection: 'row',

@@ -48,11 +48,22 @@ const ExistingUserPasswordScreen: React.FC = () => {
     }
     
     try {
+      // Afficher un message de chargement
+      toast.loading('Connexion en cours...');
+      
+      // Authentification directe via le backend
       await signIn(emailOrPhone, password);
+      
       // La navigation vers l'écran principal se fait automatiquement
       // par App.tsx qui détecte l'utilisateur connecté
+      toast.success('Connexion réussie');
     } catch (error) {
-      // Déjà géré dans la fonction signIn du context
+      // Afficher un message d'erreur spécifique
+      if (error instanceof Error) {
+        toast.error(error.message || 'Erreur de connexion');
+      } else {
+        toast.error('Erreur de connexion');
+      }
       console.error('Login failed:', error);
     }
   }, [emailOrPhone, password, signIn]);

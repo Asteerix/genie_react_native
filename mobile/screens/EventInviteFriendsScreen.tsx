@@ -15,8 +15,11 @@ import {
   Easing,
   Dimensions
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import * as ReactNavigation from '@react-navigation/native'; // Importer l'espace de noms complet
+import { RouteProp } from '@react-navigation/native'; // Garder RouteProp séparé si besoin
+import { StackNavigationProp } from '@react-navigation/stack'; // Importer StackNavigationProp
 import { Ionicons } from '@expo/vector-icons';
+import { RootStackParamList } from '../types/navigation'; // Importer RootStackParamList
 import { toast } from 'sonner-native';
 import { StatusBar } from 'expo-status-bar';
 
@@ -75,8 +78,16 @@ const FRIENDS_LIST: FriendInfo[] = [
 
 const { width } = Dimensions.get('window');
 
+// Interface pour les props de AnimatedFriendItem
+interface AnimatedFriendItemProps {
+  friend: FriendInfo;
+  isSelected: boolean;
+  onToggle: () => void;
+  index: number;
+}
+
 // Composant animé pour les éléments de liste
-const AnimatedFriendItem = ({ friend, isSelected, onToggle, index }) => {
+const AnimatedFriendItem: React.FC<AnimatedFriendItemProps> = ({ friend, isSelected, onToggle, index }) => {
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
   
@@ -148,9 +159,16 @@ const AnimatedFriendItem = ({ friend, isSelected, onToggle, index }) => {
 };
 
 const EventInviteFriendsScreen = () => {
-  const navigation = useNavigation();
+  // Typer correctement la navigation
+  const navigation = ReactNavigation.useNavigation<StackNavigationProp<RootStackParamList>>(); // Utiliser l'espace de noms
+  // Si vous avez besoin des paramètres de la route (ex: eventId):
+  // Décommenter pour récupérer eventId
+  type EventInviteFriendsRouteProp = RouteProp<RootStackParamList, 'EventInviteFriends'>;
+  const route = ReactNavigation.useRoute<EventInviteFriendsRouteProp>(); // Utiliser l'espace de noms
+  const { eventId } = route.params; // Récupérer l'eventId
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false); // Nouvel état pour gérer la sauvegarde
   const scrollY = useRef(new Animated.Value(0)).current;
   
   // Animation pour le bouton Save
@@ -191,7 +209,7 @@ const EventInviteFriendsScreen = () => {
     Clipboard.setString('https://example.com/event');
     toast.success('Lien copié !', {
       duration: 2000,
-      position: 'top'
+      // position: 'top-center' // Supprimer la position pour utiliser la valeur par défaut
     });
   };
   
@@ -205,21 +223,22 @@ const EventInviteFriendsScreen = () => {
   };
 
   const handleSave = () => {
-    const animation = Animated.timing(saveButtonAnim, {
-      toValue: 2,
-      duration: 400,
-      useNativeDriver: true,
-      easing: Easing.bezier(0.4, 0, 0.2, 1)
-    });
-    
-    animation.start(() => {
-      toast.success(`${selectedFriends.length} invitation(s) envoyée(s) !`, {
-        duration: 2000,
-        position: 'bottom',
-        style: { marginBottom: 20 }
-      });
-      navigation.goBack();
-    });
+    if (isSaving) return; // Empêcher double clic
+    setIsSaving(true); // Désactiver le bouton
+
+    // Supprimer l'animation de sortie explicite ici
+    // L'animation d'apparition/disparition est gérée par useEffect [selectedFriends]
+    // Simuler un délai pour l'API (ou l'appel API réel)
+    setTimeout(() => {
+        toast.success(`${selectedFriends.length} invitation(s) envoyée(s) !`, {
+            duration: 2000,
+            style: { marginBottom: 20 }
+        });
+        // Revenir à l'écran principal des événements PUIS naviguer vers le détail
+        navigation.popToTop(); // Retourne à EventsScreen (ou la racine de la stack)
+        navigation.push('EventDetail', { eventId: eventId }); // Ajoute EventDetail par-dessus
+        // isSaving sera réinitialisé au prochain montage de l'écran si nécessaire
+    }, 300); // Petit délai pour montrer l'état désactivé
   };
 
   // Animation pour l'apparition des éléments du header
@@ -249,7 +268,7 @@ const EventInviteFriendsScreen = () => {
         }
       ]}>
         <TouchableOpacity 
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation.popToTop()} // Revient au premier écran de la pile (EventsScreen)
           style={styles.headerButton}
           activeOpacity={0.7}
         >
@@ -404,15 +423,20 @@ const EventInviteFriendsScreen = () => {
           {
             transform: [
               { translateY: saveButtonAnim.interpolate({
-                inputRange: [0, 1, 2],
-                outputRange: [100, 0, -100]
-              })},
-              { scale: saveButtonAnim.interpolate({
-                inputRange: [0, 1, 2],
-                outputRange: [0.8, 1, 1.1]
-              })}
-            ]
-          }
+                  inputRange: [0, 1], // Garder l'animation d'entrée
+                  outputRange: [100, 0],
+                  extrapolate: 'clamp' // Empêcher d'aller au-delà de 0 pour translateY
+                })},
+                { scale: saveButtonAnim.interpolate({
+                  inputRange: [0, 1], // Garder uniquement l'animation d'entrée/sortie basée sur selectedFriends
+                  outputRange: [0.8, 1]
+                })}
+              ],
+              opacity: saveButtonAnim.interpolate({ // Garder uniquement l'animation d'entrée/sortie basée sur selectedFriends
+                inputRange: [0, 1],
+                outputRange: [0, 1]
+              })
+            } // Supprimer l'accolade en trop ici
         ]}
       >
         <TouchableOpacity 
@@ -421,10 +445,10 @@ const EventInviteFriendsScreen = () => {
             selectedFriends.length === 0 && styles.disabledButton
           ]} 
           onPress={handleSave}
-          disabled={selectedFriends.length === 0}
+          disabled={selectedFriends.length === 0 || isSaving} // Désactiver aussi si isSaving est true
           activeOpacity={0.8}
         >
-          <Text style={styles.saveButtonText}>Enregistrer</Text>
+          <Text style={styles.saveButtonText}>{isSaving ? 'Enregistrement...' : 'Enregistrer'}</Text>
         </TouchableOpacity>
       </Animated.View>
     </SafeAreaView>
@@ -586,8 +610,8 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
-  disabledButton: {
-    opacity: 0.5,
+  disabledButton: { // Style appliqué quand disabled={true}
+    opacity: 0.5, // Garder l'opacité réduite pour l'état désactivé
   },
   saveButtonText: {
     color: 'white',

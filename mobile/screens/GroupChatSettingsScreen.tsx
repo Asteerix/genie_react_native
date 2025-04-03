@@ -17,6 +17,8 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
+import { useMessaging } from '../context/MessagingContext';
+import { useAuth } from '../auth/context/AuthContext';
 
 type GroupChatSettingsRouteProp = RouteProp<RootStackParamList, 'GroupChatSettings'>;
 
@@ -40,52 +42,78 @@ const GroupChatSettingsScreen = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [muted, setMuted] = useState(false);
   
+  const { getChat, updateChat } = useMessaging();
+  const { user } = useAuth();
+  
   useEffect(() => {
     // Fetch group chat data
     const loadGroupData = async () => {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock data
-      const mockGroupName = 'Cadeaux pour Paul';
-      const mockMembers: Member[] = [
-        {
-          id: 'me',
-          name: 'Moi',
-          username: 'moi',
-          avatar: 'https://api.a0.dev/assets/image?text=avatar%20profile%20portrait&aspect=1:1',
-          isAdmin: true,
-        },
-        {
-          id: '2',
-          name: 'Audriana Toulet',
-          username: 'audrianatoulet',
-          avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait&aspect=1:1&seed=101',
-          isAdmin: false,
-        },
-        {
-          id: '3',
-          name: 'Johanna Toulet',
-          username: 'johannatoulet',
-          avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait&aspect=1:1&seed=102',
-          isAdmin: false,
-        },
-      ];
-      
-      setGroupName(mockGroupName);
-      setOriginalGroupName(mockGroupName);
-      setMembers(mockMembers);
-      setIsLoading(false);
+      try {
+        const chatData = await getChat(groupId);
+        
+        if (chatData) {
+          // Set group name
+          setGroupName(chatData.name || 'Group Chat');
+          setOriginalGroupName(chatData.name || 'Group Chat');
+          
+          // Convert participants to member format
+          // In a real implementation, you would fetch the user data for each participant
+          const groupMembers: Member[] = [
+            // Add current user first
+            {
+              id: user?.id || 'me',
+              name: user?.firstName ? `${user.firstName} ${user.lastName || ''}` : 'Moi',
+              username: user?.username || 'user',
+              avatar: user?.avatarUrl || 'https://api.a0.dev/assets/image?text=avatar%20profile%20portrait&aspect=1:1',
+              isAdmin: chatData.createdBy === user?.id, // Current user is admin if they created the chat
+            }
+          ];
+          
+          // Add other participants
+          // In a real implementation, you would fetch the participant details
+          // For now, just create placeholder members with generated avatars
+          if (chatData.participants && chatData.participants.length > 0) {
+            chatData.participants.forEach((participantId, index) => {
+              // Skip current user as they're already added
+              if (participantId !== user?.id) {
+                groupMembers.push({
+                  id: participantId,
+                  name: `Participant ${index + 1}`,
+                  username: `user${index + 1}`,
+                  avatar: `https://api.a0.dev/assets/image?text=Member&aspect=1:1&seed=${100 + index}`,
+                  isAdmin: participantId === chatData.createdBy,
+                });
+              }
+            });
+          }
+          
+          setMembers(groupMembers);
+        } else {
+          // Chat not found, show error and navigate back
+          Alert.alert('Error', 'Group chat not found');
+          navigation.goBack();
+        }
+      } catch (error) {
+        console.error('Error loading group chat:', error);
+        Alert.alert('Error', 'Failed to load group chat');
+      } finally {
+        setIsLoading(false);
+      }
     };
     
     loadGroupData();
-  }, [groupId]);
+  }, [groupId, user]);
 
-  const handleBackPress = () => {
+  const handleBackPress = async () => {
     // Check if group name has changed
     if (groupName !== originalGroupName) {
-      // In a real app, you would save the changes to the backend
-      console.log('Group name changed:', groupName);
+      try {
+        // Save the changes to the backend
+        await updateChat(groupId, groupName);
+      } catch (error) {
+        console.error('Error updating chat name:', error);
+        Alert.alert('Error', 'Failed to update chat name');
+      }
     }
     
     navigation.goBack();
@@ -127,6 +155,8 @@ const GroupChatSettingsScreen = () => {
     );
   };
 
+  const { leaveChat } = useMessaging();
+
   const handleLeaveGroup = () => {
     Alert.alert(
       "Quitter le groupe",
@@ -139,9 +169,20 @@ const GroupChatSettingsScreen = () => {
         { 
           text: "Quitter", 
           style: "destructive",
-          onPress: () => {
-            // In a real app, you would make an API call to leave group
-            navigation.navigate('Messages');
+          onPress: async () => {
+            try {
+              // Make API call to leave group
+              const success = await leaveChat(groupId);
+              
+              if (success) {
+                navigation.navigate('Messages');
+              } else {
+                Alert.alert('Error', 'Failed to leave group. Please try again.');
+              }
+            } catch (error) {
+              console.error('Error leaving group:', error);
+              Alert.alert('Error', 'An error occurred while leaving the group');
+            }
           }
         }
       ]

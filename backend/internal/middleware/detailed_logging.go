@@ -10,6 +10,7 @@ import (
 )
 
 // DetailedLoggingMiddleware logs detailed information about each HTTP request and response
+// This provides a more comprehensive version of RequestLogger
 func DetailedLoggingMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()

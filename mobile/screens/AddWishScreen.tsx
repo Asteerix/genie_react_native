@@ -1,930 +1,738 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   TextInput,
-  Image,
+  TouchableOpacity,
   ScrollView,
   SafeAreaView,
-  Animated,
-  Dimensions,
+  KeyboardAvoidingView,
   Platform,
-  StatusBar,
-  FlatList
+  ActivityIndicator,
+  Image,
+  Alert,
+  Modal
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { Ionicons, FontAwesome5, MaterialIcons } from '@expo/vector-icons';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../types/navigation';
+import { useWishlist } from '../context/WishlistContext';
+import { toast } from 'sonner-native';
+import EnhancedInAppBrowser from '../components/EnhancedInAppBrowser';
 
-interface GiftItem {
-  id: string;
-  title: string;
-  image: string;
-  brand: string;
-  price: string | null;
-}
+type AddWishScreenRouteProp = RouteProp<RootStackParamList, 'AddWish'>;
 
-interface InspirationItem {
-  id: string;
-  name: string;
-  image: string;
-}
-
-interface GiftItemProps {
-  item: GiftItem;
-  onPress?: () => void;
-}
-
-interface InspirationItemProps {
-  item: InspirationItem;
-}
-
-type RootStackParamList = {
-  ProductDetail: { productId: string };
+// URL validation function
+const isValidURL = (url: string) => {
+  try {
+    new URL(url);
+    return true;
+  } catch (e) {
+    return false;
+  }
 };
 
-type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
-
-interface CategoryProps {
-  id: string;
-  name: string;
-}
-
-interface CategoryItemProps {
-  category: CategoryProps;
-  onPress: (id: string) => void;
-  isActive: boolean;
-}
-import { Ionicons } from '@expo/vector-icons';
-import BottomTabBar from '../components/BottomTabBar';
-import SearchAddWishModal from '../components/SearchAddWishModal';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-// Enhanced AnimatedTouchable component with improved animations
-interface AnimatedTouchableProps {
-  style?: any;
-  onPress?: () => void;
-  children: React.ReactNode;
-  scale?: number;
-  disabled?: boolean;
-}
-
-const AnimatedTouchable = React.memo(({ style, onPress, children, scale = 0.95, disabled = false }: AnimatedTouchableProps) => {
-  const animatedValue = useRef(new Animated.Value(1)).current;
+// Image URL validation (checks if it's likely an image)
+const isLikelyImageURL = (url: string) => {
+  if (!isValidURL(url)) return false;
   
-  const handlePressIn = useCallback(() => {
-    Animated.spring(animatedValue, {
-      toValue: scale,
-      useNativeDriver: true,
-      speed: 25,
-      bounciness: 4,
-    }).start();
-  }, [animatedValue, scale]);
+  // Check for common image extensions
+  const imageExtensions = /\.(jpg|jpeg|png|gif|bmp|webp|svg)($|\?)/i;
+  return imageExtensions.test(url);
+};
+
+const AddWishScreen: React.FC = () => {
+  const route = useRoute<AddWishScreenRouteProp>();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { addWishItem } = useWishlist();
+  const wishlistId = route.params?.wishlistId;
+
+  // Form state
+  const [name, setName] = useState<string>('');
+  const [description, setDescription] = useState<string>('');
+  const [price, setPrice] = useState<string>('');
+  const [imageURL, setImageURL] = useState<string>('');
+  const [link, setLink] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   
-  const handlePressOut = useCallback(() => {
-    Animated.spring(animatedValue, {
-      toValue: 1,
-      useNativeDriver: true,
-      speed: 25,
-      bounciness: 4,
-    }).start();
-  }, [animatedValue]);
+  // Browser state
+  const [isBrowserVisible, setIsBrowserVisible] = useState<boolean>(false);
+  const [browserUrl, setBrowserUrl] = useState<string>('https://www.google.com');
+  const [browserMode, setBrowserMode] = useState<'image' | 'link'>('image');
+  const [apiError, setApiError] = useState<string | null>(null);
   
-  const animatedStyle = {
-    transform: [{ scale: animatedValue }],
+  // Image URL validation state
+  const [isCheckingImage, setIsCheckingImage] = useState<boolean>(false);
+  const [manualImageInput, setManualImageInput] = useState<string>('');
+  const [showManualImageInput, setShowManualImageInput] = useState<boolean>(false);
+  
+  // Check if wishlist ID is available on component mount
+  useEffect(() => {
+    if (!wishlistId) {
+      setApiError('La liste de souhaits est manquante. Veuillez réessayer.');
+    }
+  }, [wishlistId]);
+
+  // Handle saving the wish item to the API
+  const handleSave = async () => {
+    if (!wishlistId) {
+      toast.error('Aucune liste de souhaits sélectionnée');
+      setApiError('La liste de souhaits est manquante. Veuillez réessayer.');
+      return;
+    }
+
+    if (!name) {
+      toast.error('Veuillez entrer un nom pour votre vœu');
+      return;
+    }
+
+    // Validate image URL if provided
+    if (imageURL && !isLikelyImageURL(imageURL)) {
+      toast.error("L'URL de l'image semble invalide");
+      return;
+    }
+
+    // Validate product link if provided
+    if (link && !isValidURL(link)) {
+      toast.error("Le lien du produit semble invalide");
+      return;
+    }
+
+    setIsLoading(true);
+    setApiError(null);
+
+    try {
+      console.log('Sending wish item to API:', {
+        wishlistId,
+        name,
+        description,
+        price: price ? parseFloat(price) : undefined,
+        imageURL,
+        link
+      });
+      
+      const newWish = await addWishItem({
+        wishlistId,
+        name,
+        description,
+        price: price ? parseFloat(price) : undefined,
+        imageURL: imageURL || 'https://api.a0.dev/assets/image?text=product&aspect=1:1',
+        link,
+        isFavorite: false
+      });
+      
+      console.log('Wish item created successfully:', newWish);
+      toast.success('Vœu ajouté avec succès');
+      navigation.goBack();
+    } catch (error) {
+      console.error('Erreur lors de l\'ajout du vœu:', error);
+      setApiError('Erreur lors de l\'ajout du vœu. Veuillez réessayer.');
+      toast.error('Erreur lors de l\'ajout du vœu');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Open browser for searching images or products
+  const openBrowser = (mode: 'image' | 'link') => {
+    setBrowserMode(mode);
+    
+    // Set initial search URL based on mode
+    if (mode === 'image') {
+      setBrowserUrl('https://www.google.com/search?tbm=isch&q=product+image');
+    } else {
+      // Use current link if available and valid
+      if (link && isValidURL(link)) {
+        setBrowserUrl(link);
+      } else {
+        setBrowserUrl('https://www.google.com');
+      }
+    }
+    
+    setIsBrowserVisible(true);
+  };
+
+  // Check if an image URL is valid/accessible
+  const validateImageURL = async (url: string) => {
+    if (!url || !isValidURL(url)) {
+      return false;
+    }
+
+    setIsCheckingImage(true);
+    
+    try {
+      // Use timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Timeout')), 5000);
+      });
+      
+      // Alternative method: we could check headers only, but for simplicity we'll try loading the image
+      await Promise.race([
+        fetch(url),
+        timeoutPromise
+      ]);
+      
+      // If we get here, the image URL is likely valid
+      return true;
+    } catch (error) {
+      console.error('Error validating image URL:', error);
+      return false;
+    } finally {
+      setIsCheckingImage(false);
+    }
+  };
+
+  // Handle browser close with optional URL capture
+  const handleBrowserClose = () => {
+    setIsBrowserVisible(false);
+  };
+
+  // Handle image selection from browser
+  const handleSelectImage = async (selectedImageUrl: string) => {
+    console.log('Selected image URL:', selectedImageUrl);
+    
+    // Validate the image URL
+    const isValid = await validateImageURL(selectedImageUrl);
+    
+    if (isValid) {
+      setImageURL(selectedImageUrl);
+      toast.success('Image sélectionnée');
+    } else {
+      toast.error("L'URL de l'image semble invalide");
+    }
+  };
+
+  // Handle confirming a link from browser
+  const handleConfirmLink = (selectedUrl: string) => {
+    console.log('Selected link URL:', selectedUrl);
+    
+    if (isValidURL(selectedUrl)) {
+      setLink(selectedUrl);
+      toast.success('Lien enregistré');
+      
+      // Extract product name from URL if empty
+      if (!name) {
+        try {
+          const url = new URL(selectedUrl);
+          const pathParts = url.pathname.split('/').filter(p => p);
+          if (pathParts.length > 0) {
+            const possibleName = pathParts[pathParts.length - 1]
+              .replace(/-|_/g, ' ')
+              .replace(/\.(html|php|aspx)$/, '')
+              .split('?')[0];
+            
+            if (possibleName.length > 3) {
+              // Capitalize first letter and rest of words
+              setName(possibleName
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(' ')
+              );
+            }
+          }
+        } catch (e) {
+          // Ignore errors in URL parsing
+        }
+      }
+    } else {
+      toast.error('URL invalide');
+    }
   };
   
-  return (
-    <TouchableOpacity
-      activeOpacity={0.9}
-      onPress={onPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      disabled={disabled}
-    >
-      <Animated.View style={[style, animatedStyle]}>
-        {children}
-      </Animated.View>
-    </TouchableOpacity>
-  );
-});
-
-// Improved Section Header with enhanced animations
-interface SectionHeaderProps {
-  title: string;
-  onViewMore: () => void;
-}
-
-const SectionHeader = React.memo(({ title, onViewMore }: SectionHeaderProps) => {
-  const translateX = useRef(new Animated.Value(20)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-  
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration: 500,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
-  
-  return (
-    <View style={styles.sectionHeader}>
-      <Animated.Text style={[
-        styles.sectionTitle,
-        { opacity, transform: [{ translateX }] }
-      ]}>
-        {title}
-      </Animated.Text>
-      <AnimatedTouchable onPress={onViewMore} scale={0.97}>
-        <Text style={styles.viewMore}>voir plus</Text>
-      </AnimatedTouchable>
-    </View>
-  );
-});
-
-// Category Item Component
-const CategoryItem: React.FC<CategoryItemProps> = React.memo(({ category, onPress, isActive }) => {
-  return (
-    <AnimatedTouchable 
-      style={[
-        styles.categoryItem,
-        isActive && styles.activeCategoryItem
-      ]}
-      onPress={() => onPress(category.id)}
-    >
-      <Text style={[
-        styles.categoryText,
-        isActive && styles.activeCategoryText
-      ]}>
-        {category.name}
-      </Text>
-    </AnimatedTouchable>
-  );
-});
-
-// Brand Item Component - ENHANCED to fill the entire container
-interface Brand {
-  id: string;
-  name: string;
-  logo: string;
-}
-
-interface BrandItemProps {
-  brand: Brand;
-}
-
-const BrandItem = React.memo(({ brand }: BrandItemProps) => {
-  // Animation for entrance
-  const scaleAnim = useRef(new Animated.Value(0.92)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
-  
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 400,
-        delay: 150 * Math.random(), // Staggered animation
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacityAnim, {
-        toValue: 1,
-        duration: 400,
-        delay: 150 * Math.random(),
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
-  
-  return (
-    <AnimatedTouchable style={styles.brandItem}>
-      <Animated.View 
-        style={[
-          styles.brandLogoContainer,
-          { opacity: opacityAnim, transform: [{ scale: scaleAnim }] }
-        ]}
-      >
-        <Image 
-          source={{ uri: brand.logo }} 
-          style={styles.brandLogo} 
-          resizeMode="cover" // Changed from "contain" to "cover" to fill the container
-        />
-      </Animated.View>
-      <Text style={styles.brandName}>{brand.name}</Text>
-    </AnimatedTouchable>
-  );
-});
-
-// Gift Item Component - Fixed to prevent button cutoff
-const GiftItem = React.memo(({ item, onPress }: GiftItemProps) => {
-  const navigation = useNavigation<NavigationProp>();
-  // Animation for entrance
-  const translateY = useRef(new Animated.Value(20)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.97)).current;
-  
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(translateY, {
-        toValue: 0,
-        duration: 600,
-        delay: 100 * Math.random(),
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacityAnim, {
-        toValue: 1,
-        duration: 550,
-        delay: 100 * Math.random(),
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        tension: 50,
-        friction: 8,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
-  
-  const handlePress = useCallback(() => {
-    if (item.price) {
-      navigation.navigate('ProductDetail', { productId: item.id });
+  // Handle manual image URL input
+  const handleAddManualImage = async () => {
+    if (!manualImageInput) {
+      toast.error("Veuillez entrer une URL d'image");
+      return;
     }
-  }, [item, navigation]);
-  
+    
+    if (!isValidURL(manualImageInput)) {
+      toast.error("L'URL semble invalide");
+      return;
+    }
+    
+    const isValid = await validateImageURL(manualImageInput);
+    
+    if (isValid) {
+      setImageURL(manualImageInput);
+      setManualImageInput('');
+      setShowManualImageInput(false);
+      toast.success('Image ajoutée');
+    } else {
+      toast.error("Impossible de charger l'image. Vérifiez l'URL");
+    }
+  };
+
   return (
-    <AnimatedTouchable 
-      style={[
-        styles.giftItem,
-        { 
-          opacity: opacityAnim, 
-          transform: [
-            { translateY },
-            { scale: scaleAnim }
-          ] 
-        }
-      ]}
-      onPress={handlePress}
-      scale={0.97}
-    >
-      <Image 
-        source={{ uri: item.image }} 
-        style={styles.giftImage} 
-        resizeMode={item.id === 'nike' ? 'contain' : 'cover'}
-      />
-      <View style={styles.giftInfo}>
-        <Text style={styles.giftTitle} numberOfLines={1}>{item.title}</Text>
-        <View style={styles.giftRow}>
-          <View style={styles.giftBrandContainer}>
-            <Image
-              source={{ uri: 'https://api.a0.dev/assets/image?text=nike%20logo%20small&aspect=1:1&seed=9' }}
-              style={styles.giftBrandLogo}
-              resizeMode="contain"
-            />
-          </View>
-          {item.price ? (
-            <View style={styles.actionButtonContainer}>
-              <Text style={styles.priceText}>{item.price}</Text>
-              <AnimatedTouchable style={styles.actionButton} scale={0.92}>
-                <Ionicons name="add" size={16} color="white" />
-              </AnimatedTouchable>
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardAvoid}
+      >
+        <View style={styles.header}>
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="black" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Ajouter un vœu</Text>
+          <TouchableOpacity 
+            style={[styles.saveButton, (!name || !wishlistId) && styles.saveButtonDisabled]} 
+            onPress={handleSave}
+            disabled={!name || !wishlistId || isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <Text style={styles.saveButtonText}>Enregistrer</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.scrollView}>
+          <View style={styles.formContainer}>
+            {/* Error message for missing wishlist ID */}
+            {!wishlistId && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>La liste de souhaits n'est pas sélectionnée. Veuillez retourner à la liste et réessayer.</Text>
+              </View>
+            )}
+            {/* Image Preview or Placeholder */}
+            <View style={styles.imageContainer}>
+              {imageURL ? (
+                <View style={styles.imagePreviewContainer}>
+                  <Image 
+                    source={{ uri: imageURL }} 
+                    style={styles.imagePreview} 
+                    onError={() => {
+                      toast.error('Impossible de charger l\'image');
+                      setImageURL('');
+                    }}
+                  />
+                  <View style={styles.imageOverlay}>
+                    <TouchableOpacity 
+                      style={styles.imageActionButton}
+                      onPress={() => openBrowser('image')}
+                    >
+                      <Ionicons name="search" size={18} color="white" />
+                      <Text style={styles.imageActionText}>Chercher</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                      style={styles.imageActionButton}
+                      onPress={() => setShowManualImageInput(true)}
+                    >
+                      <Ionicons name="link" size={18} color="white" />
+                      <Text style={styles.imageActionText}>Saisir URL</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={styles.imageActionButton}
+                      onPress={() => setImageURL('')}
+                    >
+                      <Ionicons name="trash" size={18} color="#ff6b6b" />
+                      <Text style={[styles.imageActionText, {color: '#ff6b6b'}]}>Supprimer</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.imagePlaceholder}>
+                  <TouchableOpacity 
+                    style={styles.imagePickerOption}
+                    onPress={() => openBrowser('image')}
+                  >
+                    <View style={styles.imagePickerIconContainer}>
+                      <FontAwesome5 name="search" size={22} color="#666" />
+                    </View>
+                    <Text style={styles.imagePickerText}>Chercher une image</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={styles.imagePickerOption}
+                    onPress={() => setShowManualImageInput(true)}
+                  >
+                    <View style={styles.imagePickerIconContainer}>
+                      <MaterialIcons name="link" size={24} color="#666" />
+                    </View>
+                    <Text style={styles.imagePickerText}>Saisir URL d'image</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
-          ) : (
-            <AnimatedTouchable style={styles.viewButtonContainer} scale={0.92}>
-              <Text style={styles.viewButtonText}>voir</Text>
-            </AnimatedTouchable>
-          )}
-        </View>
-      </View>
-    </AnimatedTouchable>
-  );
-});
 
-// Inspiration Item Component
-const InspirationItem = React.memo(({ item }: InspirationItemProps) => {
-  // Animation for entrance
-  const scaleAnim = useRef(new Animated.Value(0.95)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
-  
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 500,
-        delay: 150 * Math.random(),
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacityAnim, {
-        toValue: 1,
-        duration: 500,
-        delay: 150 * Math.random(),
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
-  
-  return (
-    <AnimatedTouchable key={item.id} style={styles.inspirationItem}>
-      <Animated.View 
-        style={{ 
-          opacity: opacityAnim, 
-          transform: [{ scale: scaleAnim }],
-          width: '100%', 
-          height: '100%' 
-        }}
+            {/* Product Name */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Nom*</Text>
+              <TextInput
+                style={styles.input}
+                value={name}
+                onChangeText={setName}
+                placeholder="Nom du produit"
+                placeholderTextColor="#999"
+              />
+            </View>
+
+            {/* Description */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Description</Text>
+              <TextInput
+                style={[styles.input, styles.multilineInput]}
+                value={description}
+                onChangeText={setDescription}
+                placeholder="Description du produit"
+                placeholderTextColor="#999"
+                multiline
+                numberOfLines={4}
+              />
+            </View>
+
+            {/* Price */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Prix</Text>
+              <TextInput
+                style={styles.input}
+                value={price}
+                onChangeText={(text) => {
+                  // Filtrer pour n'accepter que les chiffres et un point
+                  const filtered = text.replace(/[^0-9.]/g, '');
+                  setPrice(filtered);
+                }}
+                placeholder="Prix"
+                placeholderTextColor="#999"
+                keyboardType="numeric"
+              />
+            </View>
+
+            {/* Product URL with browser button */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Lien du produit</Text>
+              <View style={styles.urlInputContainer}>
+                <TextInput
+                  style={[styles.input, styles.urlInput]}
+                  value={link}
+                  onChangeText={setLink}
+                  placeholder="https://example.com/product"
+                  placeholderTextColor="#999"
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity 
+                  style={styles.browseButton}
+                  onPress={() => openBrowser('link')}
+                >
+                  <FontAwesome5 name="search" size={16} color="#FFF" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Error message */}
+            {apiError && (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>{apiError}</Text>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Enhanced In-App Browser */}
+      {isBrowserVisible && (
+        <EnhancedInAppBrowser
+          visible={isBrowserVisible}
+          url={browserUrl}
+          onClose={handleBrowserClose}
+          mode={browserMode}
+          onSelectImage={handleSelectImage}
+          onConfirmLink={handleConfirmLink}
+        />
+      )}
+      
+      {/* Manual Image URL Input Modal */}
+      <Modal
+        visible={showManualImageInput}
+        animationType="fade"
+        transparent={true}
       >
-        <Image 
-          source={{ uri: item.image }} 
-          style={styles.inspirationImage} 
-          resizeMode="cover"
-        />
-        <Text style={styles.inspirationName}>{item.name}</Text>
-      </Animated.View>
-    </AnimatedTouchable>
-  );
-});
-
-// Main Screen Component
-const AddWishScreen = () => {
-  const navigation = useNavigation();
-  const [showSearchModal, setShowSearchModal] = useState(false);
-  const [activeCategory, setActiveCategory] = useState('all');
-  const scrollY = useRef(new Animated.Value(0)).current;
-  
-  // Animation for section headers
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  
-  useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 600,
-      useNativeDriver: true,
-    }).start();
-  }, []);
-
-  // Categories
-  const categories = useMemo(() => [
-    { id: 'all', name: 'Tous' },
-    { id: 'fashion', name: 'Mode' },
-    { id: 'home', name: 'Maison' },
-    { id: 'beauty', name: 'Maquillage' }
-  ], []);
-
-  // Brands - Added higher quality image URLs for better display
-  const brands = useMemo(() => [
-    { id: 'amazon', name: 'Amazon', logo: 'https://api.a0.dev/assets/image?text=amazon%20logo%20orange%20smile%20high%20quality%20fill%20square&aspect=1:1&seed=1' },
-    { id: 'etsy', name: 'Etsy', logo: 'https://api.a0.dev/assets/image?text=etsy%20logo%20orange%20text%20high%20quality%20fill%20square&aspect=1:1&seed=2' },
-    { id: 'cdiscount', name: 'Cdiscount', logo: 'https://api.a0.dev/assets/image?text=cdiscount%20logo%20blue%20megaphone%20high%20quality%20fill%20square&aspect=1:1&seed=3' },
-    { id: 'apple', name: 'Apple', logo: 'https://api.a0.dev/assets/image?text=apple%20logo%20black%20high%20quality%20fill%20square&aspect=1:1&seed=4' }
-  ], []);
-
-  // Gift ideas
-  const giftIdeas = useMemo(() => [
-    { 
-      id: 'nike', 
-      title: 'Nouveautés Nike', 
-      image: 'https://api.a0.dev/assets/image?text=nike%20logo%20white%20on%20black%20background%20professional&aspect=1:1&seed=5',
-      brand: 'Nike',
-      price: null
-    },
-    { 
-      id: 'airforce', 
-      title: 'Air Force One', 
-      image: 'https://api.a0.dev/assets/image?text=nike%20air%20force%20one%20dunk%20low%20black%20white%20sneakers%20professional%20product%20photography&aspect=1:1&seed=6',
-      brand: 'Nike',
-      price: '159.99 €'
-    }
-  ], []);
-
-  // Inspirations
-  const inspirations = useMemo(() => [
-    { 
-      id: 'christmas', 
-      name: 'Noël', 
-      image: 'https://api.a0.dev/assets/image?text=christmas%20tree%20cute%20illustration%20blue%20background&aspect=1:1&seed=7'
-    },
-    { 
-      id: 'valentine', 
-      name: 'Saint Valentin', 
-      image: 'https://api.a0.dev/assets/image?text=valentines%20day%20hearts%20cute%20illustration%20pink%20background&aspect=1:1&seed=8'
-    }
-  ], []);
-
-  // Animations for scroll events with useCallback
-  const handleScroll = useCallback(
-    Animated.event(
-      [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-      { useNativeDriver: false }
-    ),
-    [scrollY]
-  );
-
-  // Handle category selection
-  const handleCategorySelect = useCallback((categoryId: string) => {
-    setActiveCategory(categoryId);
-  }, []);
-
-  // Open search modal
-  const openSearchModal = useCallback(() => {
-    setShowSearchModal(true);
-  }, []);
-
-  // Close search modal
-  const closeSearchModal = useCallback(() => {
-    setShowSearchModal(false);
-  }, []);
-
-  // View more button handler
-  const handleViewMore = useCallback((section: 'brands' | 'giftIdeas' | 'inspirations') => {
-    console.log(`View more clicked for ${section}`);
-    // Add navigation or action based on section
-  }, []);
-
-  // Render category item with memoization
-  const renderCategoryItem = useCallback(({ item }: { item: CategoryProps }) => (
-    <CategoryItem 
-      category={item} 
-      onPress={handleCategorySelect} 
-      isActive={activeCategory === item.id}
-    />
-  ), [activeCategory, handleCategorySelect]);
-
-  // Render brand item with memoization
-  const renderBrandItem = useCallback(({ item }: { item: Brand }) => (
-    <BrandItem brand={item} />
-  ), []);
-
-  // Render gift item with memoization
-  const renderGiftItem = useCallback(({ item }: { item: GiftItem }) => (
-    <GiftItem item={item} />
-  ), []);
-
-  // Render inspiration item with memoization
-  const renderInspirationItem = useCallback(({ item }: { item: InspirationItem }) => (
-    <InspirationItem item={item} />
-  ), []);
-
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      <View style={styles.container}>
-        {/* Barre de recherche - Enhanced with better animations */}
-        <View style={styles.searchContainer}>
-          <AnimatedTouchable 
-            style={styles.searchInputWrapper}
-            onPress={openSearchModal}
-          >
-            <Ionicons name="search" size={24} color="#999" style={styles.searchIcon} />
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Ajouter une URL d'image</Text>
+            
             <TextInput
-              style={styles.searchInput}
-              placeholder="Rechercher..."
+              style={styles.modalInput}
+              value={manualImageInput}
+              onChangeText={setManualImageInput}
+              placeholder="https://example.com/image.jpg"
               placeholderTextColor="#999"
-              editable={false}
+              autoCapitalize="none"
+              autoFocus
             />
-            <Ionicons name="qr-code" size={24} color="#999" style={styles.qrIcon} />
-          </AnimatedTouchable>
-          <AnimatedTouchable style={styles.favoriteButton}>
-            <Ionicons name="heart-outline" size={28} color="#666" />
-          </AnimatedTouchable>
+            
+            <View style={styles.modalButtonsContainer}>
+              <TouchableOpacity 
+                style={styles.modalCancelButton}
+                onPress={() => {
+                  setManualImageInput('');
+                  setShowManualImageInput(false);
+                }}
+              >
+                <Text style={styles.modalCancelButtonText}>Annuler</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[
+                  styles.modalConfirmButton,
+                  !manualImageInput && styles.modalButtonDisabled,
+                  isCheckingImage && styles.modalButtonDisabled
+                ]}
+                onPress={handleAddManualImage}
+                disabled={!manualImageInput || isCheckingImage}
+              >
+                {isCheckingImage ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <Text style={styles.modalConfirmButtonText}>Ajouter</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-
-        {/* Catégories - Using FlatList for better performance */}
-        <FlatList
-          data={categories}
-          renderItem={renderCategoryItem}
-          keyExtractor={item => item.id}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoriesContainer}
-          contentContainerStyle={styles.categoriesContent}
-          snapToInterval={SCREEN_WIDTH / 3}
-          decelerationRate="fast"
-          initialNumToRender={4}
-        />
-
-        <Animated.ScrollView 
-          style={styles.content} 
-          showsVerticalScrollIndicator={false}
-          onScroll={handleScroll}
-          scrollEventThrottle={16}
-        >
-          {/* Section Marques - Enhanced with more animations */}
-          <Animated.View 
-            style={[
-              styles.section, 
-              { 
-                opacity: fadeAnim,
-                transform: [{ 
-                  translateY: scrollY.interpolate({
-                    inputRange: [-100, 0],
-                    outputRange: [-10, 0],
-                    extrapolate: 'clamp'
-                  }) 
-                }] 
-              }
-            ]}
-          >
-            <SectionHeader 
-              title="Marques" 
-              onViewMore={() => handleViewMore('brands')} 
-            />
-
-            <FlatList
-              data={brands}
-              renderItem={renderBrandItem}
-              keyExtractor={item => item.id}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.brandsContainer}
-              decelerationRate="fast"
-              initialNumToRender={4}
-            />
-          </Animated.View>
-
-          {/* Section Idées de cadeaux - Enhanced parallax effect */}
-          <Animated.View 
-            style={[
-              styles.section, 
-              { 
-                opacity: fadeAnim, 
-                transform: [{ 
-                  translateY: scrollY.interpolate({
-                    inputRange: [0, 200],
-                    outputRange: [0, -20],
-                    extrapolate: 'clamp'
-                  }) 
-                }] 
-              }
-            ]}
-          >
-            <SectionHeader 
-              title="Idées de cadeaux" 
-              onViewMore={() => handleViewMore('giftIdeas')} 
-            />
-
-            <FlatList
-              data={giftIdeas}
-              renderItem={renderGiftItem}
-              keyExtractor={item => item.id}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.giftIdeasContainer}
-              contentContainerStyle={styles.giftIdeasContentContainer}
-              decelerationRate="fast"
-              snapToInterval={195}
-              initialNumToRender={2}
-              snapToAlignment="start"
-              scrollEventThrottle={16}
-            />
-          </Animated.View>
-
-          {/* Section Inspirations - Enhanced parallax and slide effects */}
-          <Animated.View 
-            style={[
-              styles.section, 
-              { 
-                opacity: fadeAnim, 
-                transform: [{ 
-                  translateY: scrollY.interpolate({
-                    inputRange: [0, 400],
-                    outputRange: [0, -30],
-                    extrapolate: 'clamp'
-                  }) 
-                }] 
-              }
-            ]}
-          >
-            <SectionHeader 
-              title="Inspirations" 
-              onViewMore={() => handleViewMore('inspirations')} 
-            />
-
-            <FlatList
-              data={inspirations}
-              renderItem={renderInspirationItem}
-              keyExtractor={item => item.id}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.inspirationsContainer}
-              decelerationRate="fast"
-              snapToInterval={165}
-              initialNumToRender={2}
-            />
-          </Animated.View>
-
-          {/* Extra space for bottom tabs */}
-          <View style={{ height: 80 }} />
-        </Animated.ScrollView>
-        
-        <BottomTabBar activeTab="add" />
-
-        {/* Search Modal */}
-        <SearchAddWishModal
-          visible={showSearchModal}
-          onClose={closeSearchModal}
-        />
-      </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#fff',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-  },
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: 'white',
   },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    paddingTop: 15,
-    backgroundColor: '#fff',
-    borderBottomColor: '#f5f5f5',
-    borderBottomWidth: 1,
-    zIndex: 10, // Ensure search bar stays on top
-  },
-  searchInputWrapper: {
+  keyboardAvoid: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 25,
-    paddingHorizontal: 15,
-    marginRight: 15,
-    height: 50,
   },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    height: 44,
-    fontSize: 16,
-    color: '#000',
-  },
-  qrIcon: {
-    marginLeft: 8,
-  },
-  favoriteButton: {
-    width: 44,
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  categoriesContainer: {
-    maxHeight: 52,
-    marginBottom: 10,
-    paddingLeft: 12,
-    backgroundColor: '#fff',
-    zIndex: 5, // Lower than search bar but higher than content
-  },
-  categoriesContent: {
-    paddingRight: 12,
-    paddingVertical: 6,
-  },
-  categoryItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    marginRight: 12,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#eee',
-    justifyContent: 'center',
-    alignItems: 'center',
-    // Add shadow for better depth
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  activeCategoryItem: {
-    backgroundColor: '#000',
-    borderColor: '#000',
-  },
-  categoryText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#666',
-  },
-  activeCategoryText: {
-    color: '#fff',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 12,
-  },
-  section: {
-    marginBottom: 20,
-    marginTop: 10, 
-  },
-  sectionHeader: {
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 15,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
-  sectionTitle: {
-    fontSize: 30,
-    fontWeight: '700',
-    color: '#000',
+  backButton: {
+    padding: 8,
   },
-  viewMore: {
-    fontSize: 16,
-    color: '#666',
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  saveButton: {
+    backgroundColor: 'black',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  saveButtonText: {
+    color: 'white',
+    fontWeight: '600',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  formContainer: {
+    padding: 16,
+  },
+  imageContainer: {
+    marginBottom: 20,
+  },
+  imagePreviewContainer: {
+    position: 'relative',
+    alignItems: 'center',
+  },
+  imagePreview: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  imageOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 10,
+  },
+  imageActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 6,
+  },
+  imageActionText: {
+    color: 'white',
+    marginLeft: 4,
+    fontSize: 13,
     fontWeight: '500',
   },
-  brandsContainer: {
+  imagePlaceholder: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    backgroundColor: '#f5f5f5',
     flexDirection: 'row',
-    paddingVertical: 5,
-    height: 120,
-  },
-  brandItem: {
+    justifyContent: 'space-around',
     alignItems: 'center',
-    marginRight: 20,
-    height: 120,
-  },
-  // Updated brandLogoContainer to better display logos
-  brandLogoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 20,
+    marginBottom: 10,
     borderWidth: 1,
-    borderColor: '#eee',
+    borderColor: '#e0e0e0',
+    borderStyle: 'dashed',
+    paddingHorizontal: 20,
+  },
+  imagePickerOption: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+  },
+  imagePickerIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#e0e0e0',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
-    overflow: 'hidden', // Added to keep images within border radius
-    padding: 0, // Remove any internal padding
   },
-  // Updated brandLogo to fill the entire container
-  brandLogo: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#fff', // Add background in case logo has transparency
-  },
-  brandName: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginTop: 4,
-  },
-  giftIdeasContainer: {
-    flexDirection: 'row',
-    paddingVertical: 5,
-    height: 220, // Increased height to prevent cutting off buttons
-  },
-  giftIdeasContentContainer: {
-    paddingBottom: 15,
-    paddingTop: 5,
-    paddingLeft: 3,
-  },
-  // Gift item styles updated to fix button cutoff issues
-  giftItem: {
-    width: 220,
-    height: 190,
-    marginRight: 18,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  giftImage: {
-    width: '100%',
-    height: 120,
-    backgroundColor: '#000', // Black background for Nike logo
-  },
-  giftInfo: {
-    padding: 10, // Increased padding
-    paddingBottom: 12, // More bottom padding to ensure buttons are not cut off
-    backgroundColor: '#fff',
-    height: 70, // Fixed height for the info section to prevent layout shifts
-  },
-  giftTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#000',
-    marginBottom: 6, // Slightly increased margin
-    paddingHorizontal: 2,
-  },
-  giftRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 2,
-    marginTop: 2, // Added margin for better spacing
-  },
-  giftBrandLogo: {
-    width: '100%',
-    height: '100%',
-  },
-  giftBrandContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: 45,
-    height: 24,
-    overflow: 'hidden', // Ensure logo stays within container
-  },
-  priceText: {
-    fontSize: 12,
-    fontWeight: '500',
+  imagePickerText: {
     color: '#666',
+    fontSize: 13,
+    fontWeight: '500',
     textAlign: 'center',
-    marginHorizontal: 8,
-    minWidth: 60,
   },
-  actionButtonContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 28,
-    flex: 1,
-    justifyContent: 'space-between',
-    paddingLeft: 0,
+  inputContainer: {
+    marginBottom: 20,
   },
-  actionButton: {
-    width: 70, // More rectangular
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-  },
-  viewButtonContainer: {
-    paddingHorizontal: 14,
-    paddingVertical: 7, // Increased vertical padding
-    borderRadius: 20,
-    backgroundColor: '#f2f2f2',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minHeight: 28, // Minimum height ensures button is not cut off
-  },
-  viewButtonText: {
-    fontSize: 12,
-    color: '#666',
+  label: {
+    fontSize: 16,
+    marginBottom: 8,
     fontWeight: '500',
   },
-  inspirationsContainer: {
-    flexDirection: 'row',
-    paddingVertical: 5,
-    height: 200,
+  input: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
   },
-  inspirationItem: {
-    width: 150,
-    height: 190,
-    marginRight: 15,
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: '#fff',
+  multilineInput: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  urlInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  urlInput: {
+    flex: 1,
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  browseButton: {
+    backgroundColor: '#333',
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorContainer: {
+    padding: 12,
+    backgroundColor: '#ffeeee',
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  errorText: {
+    color: '#d32f2f',
+    fontSize: 14,
+  },
+  
+  // Manual image entry modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContainer: {
+    width: '100%',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 20,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 2,
     },
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
-  inspirationImage: {
-    width: '100%',
-    height: 150,
-    backgroundColor: '#f9f9f9',
-  },
-  inspirationName: {
+  modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    padding: 10,
+    marginBottom: 16,
     textAlign: 'center',
-  }
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    marginBottom: 20,
+  },
+  modalButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  modalCancelButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+    marginRight: 10,
+    flex: 1,
+  },
+  modalCancelButtonText: {
+    color: '#666',
+    fontWeight: '500',
+  },
+  modalConfirmButton: {
+    backgroundColor: '#2E7D32',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    flex: 1,
+  },
+  modalButtonDisabled: {
+    backgroundColor: '#e0e0e0',
+  },
+  modalConfirmButtonText: {
+    color: 'white',
+    fontWeight: '600',
+  },
 });
 
-export default React.memo(AddWishScreen);
+export default AddWishScreen;

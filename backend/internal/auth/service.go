@@ -1,19 +1,30 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
+	"mime/multipart"
+	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/asteerix/auth-backend/internal/config"
-	"github.com/asteerix/auth-backend/internal/db"
-	"github.com/asteerix/auth-backend/internal/middleware"
-	"github.com/asteerix/auth-backend/internal/models"
-	"github.com/asteerix/auth-backend/internal/utils"
+	"genie/internal/config"
+	"genie/internal/db"
+	"genie/internal/middleware"
+	"genie/internal/models"
+	"genie/internal/utils"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -23,21 +34,21 @@ import (
 
 // Service fournit les fonctionnalités d'authentification
 type Service struct {
-	db          *db.Database
-	jwtService  *middleware.JWTService
+	db           *db.Database
+	jwtService   *middleware.JWTService
 	emailService *utils.EmailService
-	smsService  *utils.SMSService
-	config     *config.Config
+	smsService   *utils.SMSService
+	config       *config.Config
 }
 
 // NewService crée une nouvelle instance du service d'authentification
 func NewService(database *db.Database, jwtService *middleware.JWTService, emailService *utils.EmailService, smsService *utils.SMSService, cfg *config.Config) *Service {
 	return &Service{
-		db:          database,
-		jwtService:  jwtService,
+		db:           database,
+		jwtService:   jwtService,
 		emailService: emailService,
-		smsService:  smsService,
-		config:     cfg,
+		smsService:   smsService,
+		config:       cfg,
 	}
 }
 
@@ -204,20 +215,20 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 	// Créer le nouvel utilisateur
 	now := time.Now()
 	newUser := models.User{
-		ID:            primitive.NewObjectID(),
-		Email:         req.Email,
-		Phone:         req.Phone,
-		PasswordHash:  string(hashedPassword),
-		FirstName:     req.FirstName,
-		LastName:      req.LastName,
-		Gender:        req.Gender,
-		BirthDate:     birthDate,
-		IsVerified:    false,
+		ID:              primitive.NewObjectID(),
+		Email:           req.Email,
+		Phone:           req.Phone,
+		PasswordHash:    string(hashedPassword),
+		FirstName:       req.FirstName,
+		LastName:        req.LastName,
+		Gender:          req.Gender,
+		BirthDate:       birthDate,
+		IsVerified:      false,
 		ManagedAccounts: []primitive.ObjectID{},
-		RefreshTokens: []models.RefreshToken{},
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		LastLoginAt:   now,
+		RefreshTokens:   []models.RefreshToken{},
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		LastLoginAt:     now,
 	}
 
 	// Insérer l'utilisateur dans la base de données
@@ -270,7 +281,7 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 	}
 
 	// Log détaillé de l'inscription utilisateur dans le terminal avec fmt.Println pour plus de visibilité
-	fmt.Println("\n\n")
+	fmt.Print("\n\n")
 	fmt.Println("====================================================")
 	fmt.Println("============ NOUVELLE INSCRIPTION UTILISATEUR ======")
 	fmt.Println("====================================================")
@@ -278,17 +289,17 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 	fmt.Printf("Prénom: %s\n", newUser.FirstName)
 	fmt.Printf("Nom: %s\n", newUser.LastName)
 	fmt.Printf("Genre: %s\n", newUser.Gender)
-	
+
 	if !birthDate.IsZero() {
 		fmt.Printf("Date de naissance: %s\n", birthDate.Format("2006-01-02"))
 	} else {
 		fmt.Println("Date de naissance: Non spécifiée")
 	}
-	
+
 	fmt.Printf("Email: %s\n", newUser.Email)
 	fmt.Printf("Téléphone: %s\n", newUser.Phone)
 	fmt.Printf("Vérifié: %t\n", newUser.IsVerified)
-	
+
 	// Information sur l'avatar ou la photo de profil
 	if newUser.AvatarURL != "" {
 		fmt.Printf("Avatar URL: %s\n", newUser.AvatarURL)
@@ -297,22 +308,22 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 	} else {
 		fmt.Println("Pas d'avatar ni de photo de profil")
 	}
-	
+
 	// Récupération et affichage des comptes gérés
 	fmt.Println("\n====================================================")
 	fmt.Println("================= COMPTES GÉRÉS ====================")
 	fmt.Println("====================================================")
-	
+
 	if len(newUser.ManagedAccounts) > 0 {
 		fmt.Printf("Nombre total de comptes gérés: %d\n", len(newUser.ManagedAccounts))
-		
+
 		// Récupérer les détails complets des comptes gérés
 		var managedAccounts []models.ManagedAccount
-		cursor, err := s.db.Database.Collection("managedAccounts").Find(
+		cursor, err := s.db.DB.Collection("managedAccounts").Find(
 			ctx,
 			bson.M{"_id": bson.M{"$in": newUser.ManagedAccounts}},
 		)
-		
+
 		if err == nil {
 			if err = cursor.All(ctx, &managedAccounts); err == nil && len(managedAccounts) > 0 {
 				for i, account := range managedAccounts {
@@ -321,15 +332,15 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 					fmt.Printf("Prénom: %s\n", account.FirstName)
 					fmt.Printf("Nom: %s\n", account.LastName)
 					fmt.Printf("Genre: %s\n", account.Gender)
-					
+
 					if !account.BirthDate.IsZero() {
 						fmt.Printf("Date de naissance: %s\n", account.BirthDate.Format("2006-01-02"))
 					} else {
 						fmt.Println("Date de naissance: Non spécifiée")
 					}
-					
-					fmt.Printf("Parent/Gardien: %s\n", account.UserID.Hex())
-					
+
+					fmt.Printf("Parent/Gardien: %s\n", account.OwnerID.Hex())
+
 					// Information sur l'avatar ou la photo de profil du compte géré
 					if account.AvatarURL != "" {
 						fmt.Printf("Avatar URL: %s\n", account.AvatarURL)
@@ -353,21 +364,21 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 	fmt.Println("\n====================================================")
 	fmt.Println("================= DEMANDES D'AMIS ==================")
 	fmt.Println("====================================================")
-	
-	var friendRequests []bson.M
-	cursor, err := s.db.Database.Collection("friendRequests").Find(
+
+	var pendingRequests []bson.M
+	cursor, err := s.db.DB.Collection("friendRequests").Find(
 		ctx,
 		bson.M{"requesterId": newUser.ID},
 	)
-	
+
 	if err == nil {
-		if err = cursor.All(ctx, &friendRequests); err == nil && len(friendRequests) > 0 {
-			fmt.Printf("Nombre total de demandes d'amis envoyées: %d\n", len(friendRequests))
-			
-			for i, request := range friendRequests {
+		if err = cursor.All(ctx, &pendingRequests); err == nil && len(pendingRequests) > 0 {
+			fmt.Printf("Nombre total de demandes d'amis envoyées: %d\n", len(pendingRequests))
+
+			for i, request := range pendingRequests {
 				if recipientID, ok := request["recipientId"].(primitive.ObjectID); ok {
 					fmt.Printf("\n=== DEMANDE D'AMI #%d ===\n", i+1)
-					
+
 					// Récupérer les informations de l'ami
 					var friend models.User
 					err := s.db.Users.FindOne(ctx, bson.M{"_id": recipientID}).Decode(&friend)
@@ -378,7 +389,7 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 						fmt.Printf("Email: %s\n", friend.Email)
 						fmt.Printf("Téléphone: %s\n", friend.Phone)
 						fmt.Printf("Statut: En attente\n")
-						
+
 						// Informations sur l'avatar ou photo de profil de l'ami
 						if friend.AvatarURL != "" {
 							fmt.Printf("Avatar URL: %s\n", friend.AvatarURL)
@@ -391,12 +402,12 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 						fmt.Printf("Statut: En attente\n")
 						fmt.Println("Détails du destinataire non disponibles")
 					}
-					
+
 					// Afficher les détails supplémentaires de la demande si disponibles
 					if createdAt, ok := request["createdAt"].(primitive.DateTime); ok {
 						fmt.Printf("Date d'envoi: %s\n", createdAt.Time().Format("2006-01-02 15:04:05"))
 					}
-					
+
 					fmt.Println("-------------------------")
 				}
 			}
@@ -406,14 +417,14 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 	} else {
 		fmt.Println("Impossible de récupérer les demandes d'amis")
 	}
-	
+
 	// Format console pour être bien visible
-	fmt.Println("\n")
+	fmt.Print("\n")
 	fmt.Println("====================================================")
 	fmt.Println("========== FIN INSCRIPTION UTILISATEUR =============")
 	fmt.Println("====================================================")
-	fmt.Println("\n")
-	
+	fmt.Print("\n")
+
 	// Conserver également les logs structurés pour les logs de l'application
 	log.Info().Str("ID", newUser.ID.Hex()).
 		Str("Prénom", newUser.FirstName).
@@ -427,7 +438,7 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 	fmt.Printf("Email: %s\n", newUser.Email)
 	fmt.Printf("Téléphone: %s\n", newUser.Phone)
 	fmt.Printf("Compte vérifié: %t\n", newUser.IsVerified)
-	
+
 	// Informations sur l'avatar ou photo de profil
 	if newUser.AvatarURL != "" {
 		fmt.Printf("Avatar URL: %s (pas de photo de profil)\n", newUser.AvatarURL)
@@ -441,7 +452,7 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 	fmt.Println("\n====================================================")
 	fmt.Println("================= COMPTES GÉRÉS ====================")
 	fmt.Println("====================================================")
-	
+
 	var managedAccounts []models.ManagedAccount
 	if len(newUser.ManagedAccounts) > 0 {
 		cursor, err := s.db.ManagedAccounts.Find(ctx, bson.M{"ownerId": newUser.ID})
@@ -456,7 +467,7 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 					fmt.Printf("Genre: %s\n", account.Gender)
 					fmt.Printf("Date de naissance: %s\n", account.BirthDate.Format("2006-01-02"))
 					fmt.Printf("Relation: %s\n", account.Relationship)
-					
+
 					// Informations sur l'avatar ou photo de profil du compte géré
 					if account.AvatarURL != "" {
 						fmt.Printf("Avatar URL: %s (pas de photo de profil)\n", account.AvatarURL)
@@ -480,21 +491,21 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 	fmt.Println("\n====================================================")
 	fmt.Println("================= DEMANDES D'AMIS ==================")
 	fmt.Println("====================================================")
-	
-	var friendRequests []bson.M
-	cursor, err := s.db.Database.Collection("friendRequests").Find(
+
+	pendingRequests = nil
+	cursor, err = s.db.DB.Collection("friendRequests").Find(
 		ctx,
 		bson.M{"requesterId": newUser.ID},
 	)
-	
+
 	if err == nil {
-		if err = cursor.All(ctx, &friendRequests); err == nil && len(friendRequests) > 0 {
-			fmt.Printf("Nombre total de demandes d'amis envoyées: %d\n", len(friendRequests))
-			
-			for i, request := range friendRequests {
+		if err = cursor.All(ctx, &pendingRequests); err == nil && len(pendingRequests) > 0 {
+			fmt.Printf("Nombre total de demandes d'amis envoyées: %d\n", len(pendingRequests))
+
+			for i, request := range pendingRequests {
 				if recipientID, ok := request["recipientId"].(primitive.ObjectID); ok {
 					fmt.Printf("\n=== DEMANDE D'AMI #%d ===\n", i+1)
-					
+
 					// Récupérer les informations de l'ami
 					var friend models.User
 					err := s.db.Users.FindOne(ctx, bson.M{"_id": recipientID}).Decode(&friend)
@@ -505,7 +516,7 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 						fmt.Printf("Email: %s\n", friend.Email)
 						fmt.Printf("Téléphone: %s\n", friend.Phone)
 						fmt.Printf("Statut: En attente\n")
-						
+
 						// Informations sur l'avatar ou photo de profil de l'ami
 						if friend.AvatarURL != "" {
 							fmt.Printf("Avatar URL: %s\n", friend.AvatarURL)
@@ -518,12 +529,12 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 						fmt.Printf("Statut: En attente\n")
 						fmt.Println("Détails du destinataire non disponibles")
 					}
-					
+
 					// Afficher les détails supplémentaires de la demande si disponibles
 					if createdAt, ok := request["createdAt"].(primitive.DateTime); ok {
 						fmt.Printf("Date d'envoi: %s\n", createdAt.Time().Format("2006-01-02 15:04:05"))
 					}
-					
+
 					fmt.Println("-------------------------")
 				}
 			}
@@ -533,14 +544,14 @@ func (s *Service) SignUp(ctx context.Context, req models.SignUpRequest) (*models
 	} else {
 		fmt.Println("Impossible de récupérer les demandes d'amis")
 	}
-	
+
 	// Format console pour être bien visible
-	fmt.Println("\n")
+	fmt.Print("\n")
 	fmt.Println("====================================================")
 	fmt.Println("========== FIN INSCRIPTION UTILISATEUR =============")
 	fmt.Println("====================================================")
-	fmt.Println("\n")
-	
+	fmt.Print("\n")
+
 	// Conserver également les logs structurés pour les logs de l'application
 	log.Info().Str("ID", newUser.ID.Hex()).
 		Str("Prénom", newUser.FirstName).
@@ -582,14 +593,14 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 	}).Decode(&user)
 
 	now := time.Now()
-	
+
 	// Si l'utilisateur n'existe pas, en créer un nouveau
 	if err == mongo.ErrNoDocuments {
 		// Si l'email est fourni, vérifier s'il existe déjà un compte avec cet email
 		if req.Email != "" {
 			var existingUser models.User
 			err = s.db.Users.FindOne(ctx, bson.M{"email": req.Email}).Decode(&existingUser)
-			
+
 			if err == nil {
 				// L'utilisateur existe déjà avec cet email, ajouter le compte social
 				socialAuth := models.SocialAuth{
@@ -607,7 +618,7 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 							"socialAuth": socialAuth,
 						},
 						"$set": bson.M{
-							"updatedAt": now,
+							"updatedAt":   now,
 							"lastLoginAt": now,
 						},
 					},
@@ -624,14 +635,14 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 			} else {
 				// Créer un nouvel utilisateur avec les informations sociales
 				user = models.User{
-					ID:            primitive.NewObjectID(),
-					Email:         req.Email,
-					FirstName:     req.FirstName,
-					LastName:      req.LastName,
-					AvatarURL:     req.AvatarURL,
-					IsVerified:    true, // Présumer que l'authentification sociale confirme l'identité
+					ID:              primitive.NewObjectID(),
+					Email:           req.Email,
+					FirstName:       req.FirstName,
+					LastName:        req.LastName,
+					AvatarURL:       req.AvatarURL,
+					IsVerified:      true, // Présumer que l'authentification sociale confirme l'identité
 					ManagedAccounts: []primitive.ObjectID{},
-					RefreshTokens: []models.RefreshToken{},
+					RefreshTokens:   []models.RefreshToken{},
 					SocialAuth: []models.SocialAuth{
 						{
 							Provider:    req.Provider,
@@ -650,7 +661,7 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 					log.Error().Err(err).Msg("Erreur lors de la création d'un nouvel utilisateur via authentification sociale")
 					return nil, err
 				}
-				
+
 				// Log détaillé de l'inscription utilisateur via social avec email
 				log.Info().Msg("====================================================")
 				log.Info().Msg("==== NOUVELLE INSCRIPTION UTILISATEUR (SOCIAL) =====")
@@ -664,7 +675,7 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 					Str("Email", user.Email).
 					Str("Téléphone", user.Phone).
 					Bool("Vérifié", user.IsVerified).Msg("Informations utilisateur")
-				
+
 				// Informations sur l'avatar ou photo de profil
 				if user.AvatarURL != "" {
 					log.Info().Msgf("AVATAR: %s", user.AvatarURL)
@@ -673,28 +684,28 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 				} else {
 					log.Info().Msg("Pas d'avatar ni de photo de profil configuré")
 				}
-				
+
 				log.Info().Msg("====================================================")
 				log.Info().Msg("================= COMPTES GÉRÉS ====================")
 				log.Info().Msg("====================================================")
 				log.Info().Msg("Aucun compte géré (nouvelle inscription sociale)")
-				
+
 				log.Info().Msg("====================================================")
 				log.Info().Msg("================= DEMANDES D'AMIS ==================")
 				log.Info().Msg("====================================================")
-				
+
 				// Récupération et affichage des demandes d'amis
-				var friendRequests []bson.M
-				cursor, err := s.db.Database.Collection("friendRequests").Find(
+				var pendingRequests2 []bson.M
+				cursor, err := s.db.DB.Collection("friendRequests").Find(
 					ctx,
 					bson.M{"requesterId": user.ID},
 				)
-				
+
 				if err == nil {
-					if err = cursor.All(ctx, &friendRequests); err == nil && len(friendRequests) > 0 {
-						log.Info().Msgf("Nombre total de demandes d'amis: %d", len(friendRequests))
-						
-						for i, request := range friendRequests {
+					if err = cursor.All(ctx, &pendingRequests2); err == nil && len(pendingRequests2) > 0 {
+						log.Info().Msgf("Nombre total de demandes d'amis: %d", len(pendingRequests2))
+
+						for i, request := range pendingRequests2 {
 							if recipientID, ok := request["recipientId"].(primitive.ObjectID); ok {
 								// Récupérer les informations de l'ami
 								var friend models.User
@@ -720,7 +731,7 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 				} else {
 					log.Info().Msg("Aucune demande d'ami trouvée dans le processus d'inscription sociale")
 				}
-				
+
 				log.Info().Msg("====================================================")
 				log.Info().Msg("========== FIN INSCRIPTION UTILISATEUR =============")
 				log.Info().Msg("====================================================")
@@ -728,13 +739,13 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 		} else {
 			// Créer un nouvel utilisateur avec les informations sociales sans email
 			user = models.User{
-				ID:            primitive.NewObjectID(),
-				FirstName:     req.FirstName,
-				LastName:      req.LastName,
-				AvatarURL:     req.AvatarURL,
-				IsVerified:    true, // Présumer que l'authentification sociale confirme l'identité
+				ID:              primitive.NewObjectID(),
+				FirstName:       req.FirstName,
+				LastName:        req.LastName,
+				AvatarURL:       req.AvatarURL,
+				IsVerified:      true, // Présumer que l'authentification sociale confirme l'identité
 				ManagedAccounts: []primitive.ObjectID{},
-				RefreshTokens: []models.RefreshToken{},
+				RefreshTokens:   []models.RefreshToken{},
 				SocialAuth: []models.SocialAuth{
 					{
 						Provider:    req.Provider,
@@ -752,7 +763,7 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 				log.Error().Err(err).Msg("Erreur lors de la création d'un nouvel utilisateur via authentification sociale")
 				return nil, err
 			}
-			
+
 			// Log détaillé de l'inscription utilisateur via social sans email
 			log.Info().Msg("====================================================")
 			log.Info().Msg("==== NOUVELLE INSCRIPTION UTILISATEUR (SOCIAL) =====")
@@ -764,7 +775,7 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 				Str("Genre", user.Gender).
 				Time("Date de naissance", user.BirthDate).
 				Bool("Vérifié", user.IsVerified).Msg("Informations utilisateur (sans email)")
-			
+
 			// Informations sur l'avatar ou photo de profil
 			if user.AvatarURL != "" {
 				log.Info().Msgf("AVATAR: %s", user.AvatarURL)
@@ -773,28 +784,28 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 			} else {
 				log.Info().Msg("Pas d'avatar ni de photo de profil configuré")
 			}
-			
+
 			log.Info().Msg("====================================================")
 			log.Info().Msg("================= COMPTES GÉRÉS ====================")
 			log.Info().Msg("====================================================")
 			log.Info().Msg("Aucun compte géré (nouvelle inscription sociale)")
-			
+
 			log.Info().Msg("====================================================")
 			log.Info().Msg("================= DEMANDES D'AMIS ==================")
 			log.Info().Msg("====================================================")
-			
+
 			// Récupération et affichage des demandes d'amis
-			var friendRequests []bson.M
-			cursor, err := s.db.Database.Collection("friendRequests").Find(
+			var pendingRequests3 []bson.M
+			cursor, err := s.db.DB.Collection("friendRequests").Find(
 				ctx,
 				bson.M{"requesterId": user.ID},
 			)
-			
+
 			if err == nil {
-				if err = cursor.All(ctx, &friendRequests); err == nil && len(friendRequests) > 0 {
-					log.Info().Msgf("Nombre total de demandes d'amis: %d", len(friendRequests))
-					
-					for i, request := range friendRequests {
+				if err = cursor.All(ctx, &pendingRequests3); err == nil && len(pendingRequests3) > 0 {
+					log.Info().Msgf("Nombre total de demandes d'amis: %d", len(pendingRequests3))
+
+					for i, request := range pendingRequests3 {
 						if recipientID, ok := request["recipientId"].(primitive.ObjectID); ok {
 							// Récupérer les informations de l'ami
 							var friend models.User
@@ -820,7 +831,7 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 			} else {
 				log.Info().Msg("Aucune demande d'ami trouvée dans le processus d'inscription sociale")
 			}
-			
+
 			log.Info().Msg("====================================================")
 			log.Info().Msg("========== FIN INSCRIPTION UTILISATEUR =============")
 			log.Info().Msg("====================================================")
@@ -833,15 +844,15 @@ func (s *Service) SocialLogin(ctx context.Context, req models.SocialLoginRequest
 		_, err = s.db.Users.UpdateOne(
 			ctx,
 			bson.M{
-				"_id": user.ID,
+				"_id":                 user.ID,
 				"socialAuth.provider": req.Provider,
-				"socialAuth.userId": req.SocialID,
+				"socialAuth.userId":   req.SocialID,
 			},
 			bson.M{
 				"$set": bson.M{
 					"socialAuth.$.accessToken": req.Token,
-					"lastLoginAt": now,
-					"updatedAt": now,
+					"lastLoginAt":              now,
+					"updatedAt":                now,
 				},
 			},
 		)
@@ -958,7 +969,7 @@ func (s *Service) SignOut(ctx context.Context, userID string, refreshToken strin
 		// Si aucun token spécifique n'est fourni, déconnecter toutes les sessions
 		// en supprimant tous les tokens de rafraîchissement
 		log.Info().Str("userID", userID).Msg("Déconnexion de toutes les sessions (refresh token non fourni)")
-		
+
 		_, err = s.db.Users.UpdateOne(
 			ctx,
 			bson.M{"_id": id},
@@ -971,7 +982,7 @@ func (s *Service) SignOut(ctx context.Context, userID string, refreshToken strin
 	} else {
 		// Supprimer uniquement le token de rafraîchissement spécifié
 		log.Info().Str("userID", userID).Str("token", refreshToken[:10]+"...").Msg("Déconnexion d'une session spécifique")
-		
+
 		_, err = s.db.Users.UpdateOne(
 			ctx,
 			bson.M{"_id": id},
@@ -984,7 +995,7 @@ func (s *Service) SignOut(ctx context.Context, userID string, refreshToken strin
 			},
 		)
 	}
-	
+
 	if err != nil {
 		log.Error().Err(err).Msg("Erreur lors de la suppression du token de rafraîchissement")
 		return err
@@ -1017,7 +1028,7 @@ func (s *Service) RequestPasswordReset(ctx context.Context, emailOrPhone string)
 
 	// Générer un code de réinitialisation (6 chiffres)
 	resetCode := generateRandomCode(6)
-	
+
 	// Calculer l'expiration
 	expiresAt := time.Now().Add(s.config.Security.ResetTokenLifetime)
 
@@ -1124,7 +1135,7 @@ func (s *Service) ResetPassword(ctx context.Context, req models.NewPasswordReque
 				"resetTokenExpires": time.Time{},
 				"updatedAt":         time.Now(),
 				// Supprimer tous les tokens de rafraîchissement pour forcer la reconnexion
-				"refreshTokens":     []models.RefreshToken{},
+				"refreshTokens": []models.RefreshToken{},
 			},
 		},
 	)
@@ -1174,7 +1185,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID string, req models.U
 		// Vérifier si un autre utilisateur utilise déjà cet email
 		existingCount, err := s.db.Users.CountDocuments(ctx, bson.M{
 			"email": req.Email,
-			"_id": bson.M{"$ne": id},
+			"_id":   bson.M{"$ne": id},
 		})
 		if err != nil {
 			log.Error().Err(err).Msg("Erreur lors de la vérification de l'unicité de l'email")
@@ -1197,7 +1208,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID string, req models.U
 		// Vérifier si un autre utilisateur utilise déjà ce téléphone
 		existingCount, err := s.db.Users.CountDocuments(ctx, bson.M{
 			"phone": normalizedPhone,
-			"_id": bson.M{"$ne": id},
+			"_id":   bson.M{"$ne": id},
 		})
 		if err != nil {
 			log.Error().Err(err).Msg("Erreur lors de la vérification de l'unicité du téléphone")
@@ -1299,6 +1310,110 @@ func (s *Service) SetProfilePicture(ctx context.Context, userID string, profileP
 	return nil
 }
 
+// UploadUserImage télécharge et stocke une image pour l'utilisateur
+func (s *Service) UploadUserImage(ctx context.Context, userID, imageType string, file multipart.File, header *multipart.FileHeader) (string, error) {
+	_, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return "", errors.New("ID utilisateur invalide")
+	}
+
+	// Générer un nom de fichier unique
+	ext := filepath.Ext(header.Filename)
+	filename := uuid.New().String() + ext
+
+	// Définir le chemin de destination selon le type
+	uploadPath := filepath.Join(s.config.Storage.AvatarBucketPath, filename)
+
+	// Lire le contenu du fichier
+	buffer, err := io.ReadAll(file)
+	if err != nil {
+		log.Error().Err(err).Msg("Erreur lors de la lecture du fichier")
+		return "", err
+	}
+
+	// Vérifier si c'est bien une image
+	contentType := http.DetectContentType(buffer)
+	if !strings.HasPrefix(contentType, "image/") {
+		return "", errors.New("le fichier n'est pas une image valide")
+	}
+
+	// Configurer le client S3
+	s3Client, err := s.getS3Client()
+	if err != nil {
+		log.Error().Err(err).Msg("Erreur lors de la configuration du client S3")
+		return "", err
+	}
+
+	// Télécharger le fichier vers S3
+	_, err = s3Client.PutObject(&s3.PutObjectInput{
+		Bucket:        aws.String(s.config.Storage.S3Bucket),
+		Key:           aws.String(uploadPath),
+		Body:          bytes.NewReader(buffer),
+		ContentLength: aws.Int64(header.Size),
+		ContentType:   aws.String(contentType),
+	})
+
+	if err != nil {
+		log.Error().Err(err).Msg("Erreur lors du téléchargement vers S3")
+		return "", err
+	}
+
+	// Construire l'URL de l'image
+	imageURL := ""
+	if s.config.Storage.S3Endpoint != "" {
+		// Si un endpoint personnalisé (comme MinIO) est configuré
+		imageURL = fmt.Sprintf("%s/%s/%s",
+			strings.TrimRight(s.config.Storage.S3Endpoint, "/"),
+			s.config.Storage.S3Bucket,
+			uploadPath)
+	} else {
+		// S3 standard AWS
+		imageURL = fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s",
+			s.config.Storage.S3Bucket,
+			s.config.Storage.S3Region,
+			uploadPath)
+	}
+
+	// Mettre à jour l'utilisateur avec la nouvelle URL d'image
+	if imageType == "avatar" {
+		err = s.SetAvatar(ctx, userID, imageURL)
+	} else if imageType == "profilePicture" {
+		err = s.SetProfilePicture(ctx, userID, imageURL)
+	}
+
+	if err != nil {
+		log.Error().Err(err).Msg("Erreur lors de la mise à jour de l'utilisateur")
+		return "", err
+	}
+
+	return imageURL, nil
+}
+
+// getS3Client retourne un client S3 configuré
+func (s *Service) getS3Client() (*s3.S3, error) {
+	awsConfig := &aws.Config{
+		Region: aws.String(s.config.Storage.S3Region),
+		Credentials: credentials.NewStaticCredentials(
+			s.config.Storage.S3AccessKey,
+			s.config.Storage.S3SecretKey,
+			""),
+	}
+
+	// Si un endpoint personnalisé est configuré (par exemple MinIO)
+	if s.config.Storage.S3Endpoint != "" {
+		awsConfig.Endpoint = aws.String(s.config.Storage.S3Endpoint)
+		awsConfig.DisableSSL = aws.Bool(strings.HasPrefix(s.config.Storage.S3Endpoint, "http://"))
+		awsConfig.S3ForcePathStyle = aws.Bool(true)
+	}
+
+	session, err := session.NewSession(awsConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return s3.New(session), nil
+}
+
 // Fonctions utilitaires
 
 // isEmail vérifie si une chaîne est un email valide
@@ -1312,7 +1427,7 @@ func normalizePhone(phone string) string {
 	// Supprimer tous les caractères non numériques
 	phoneRegex := regexp.MustCompile(`[^0-9+]`)
 	normalized := phoneRegex.ReplaceAllString(phone, "")
-	
+
 	// Assurer que le numéro commence par "+"
 	if !strings.HasPrefix(normalized, "+") {
 		// Supposer que c'est un numéro français si pas d'indicatif
@@ -1322,7 +1437,7 @@ func normalizePhone(phone string) string {
 			normalized = "+" + normalized
 		}
 	}
-	
+
 	return normalized
 }
 

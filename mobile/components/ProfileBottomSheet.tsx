@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { ManagedAccount } from '../api/types';
 
 // Hauteur de l'écran
 const { height } = Dimensions.get('window');
@@ -27,9 +28,9 @@ interface ProfileType {
 interface ProfileBottomSheetProps {
   visible: boolean;
   onClose: () => void;
-  currentProfile: ProfileType;
-  activeProfile: ProfileType;
-  managedAccounts: ProfileType[];
+  currentProfile: ProfileType | null;
+  activeProfile: ProfileType | null;
+  managedAccounts: ProfileType[] | ManagedAccount[];
   onSelectProfile: (profileId: string) => void;
 }
 
@@ -41,6 +42,106 @@ const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
   managedAccounts,
   onSelectProfile,
 }) => {
+  // Rendu du profil principal
+  const renderMainProfile = () => {
+    if (!currentProfile || !activeProfile) return null;
+    
+    return (
+      <TouchableOpacity
+        key="current-profile"
+        style={[
+          styles.profileItem,
+          activeProfile.id === currentProfile.id && styles.activeProfileItem
+        ]}
+        onPress={() => {
+          onSelectProfile(currentProfile.id);
+          onClose();
+        }}
+      >
+        <Image
+          source={{ uri: currentProfile.avatar }}
+          style={styles.avatar}
+        />
+        <View style={styles.profileInfo}>
+          <Text style={styles.profileName}>{currentProfile.name}</Text>
+          <Text style={styles.profileUsername}>{currentProfile.username}</Text>
+        </View>
+        <Text style={styles.balance}>{currentProfile.balance} €</Text>
+        {activeProfile.id === currentProfile.id && (
+          <View style={styles.checkmarkContainer}>
+            <Ionicons key="current-checkmark" name="checkmark-circle" size={24} color="#4285F4" />
+          </View>
+        )}
+        <Ionicons key="current-forward" name="chevron-forward" size={24} color="#DDD" />
+      </TouchableOpacity>
+    );
+  };
+
+  // Rendu des comptes gérés
+  const renderManagedAccounts = () => {
+    if (managedAccounts.length === 0 || !activeProfile) return null;
+    
+    return (
+      <>
+        <Text style={styles.sectionTitle}>Mes comptes gérés</Text>
+        {managedAccounts.map((account) => {
+          // Handle both ProfileType and ManagedAccount types
+          const accountId = account.id;
+          const accountName = 'name' in account ? account.name : `${account.firstName || 'Utilisateur'} ${account.lastName || ''}`.trim();
+          const accountUsername = account.username || '';
+          const accountAvatar = 'avatar' in account ? account.avatar : 
+            account.avatarUrl || `https://api.a0.dev/assets/image?text=${account.firstName?.charAt(0) || ''}${account.lastName?.charAt(0) || ''}`;
+          const accountBalance = account.balance || 0;
+          
+          return (
+            <TouchableOpacity
+              key={`account-${accountId}`}
+              style={[
+                styles.profileItem,
+                activeProfile.id === accountId && styles.activeProfileItem
+              ]}
+              onPress={() => {
+                onSelectProfile(accountId);
+                onClose();
+              }}
+            >
+              <Image
+                source={{ uri: accountAvatar }}
+                style={styles.avatar}
+              />
+              <View style={styles.profileInfo}>
+                <Text style={styles.profileName}>{accountName}</Text>
+                <Text style={styles.profileUsername}>{accountUsername}</Text>
+              </View>
+              <Text style={styles.balance}>{accountBalance} €</Text>
+              {activeProfile.id === accountId && (
+                <View style={styles.checkmarkContainer}>
+                  <Ionicons key={`checkmark-${accountId}`} name="checkmark-circle" size={24} color="#4285F4" />
+                </View>
+              )}
+              <Ionicons key={`forward-${accountId}`} name="chevron-forward" size={24} color="#DDD" />
+            </TouchableOpacity>
+          );
+        })}
+      </>
+    );
+  };
+
+  // Rendu du bouton "Créer un nouveau compte"
+  const renderCreateAccountButton = () => (
+    <TouchableOpacity 
+      key="create-account-button"
+      style={styles.createAccountButton}
+    >
+      <View style={styles.addIconContainer}>
+        <Ionicons key="add-icon" name="add" size={24} color="#999" />
+      </View>
+      <Text style={styles.createAccountText}>Créer un nouveau</Text>
+      <View style={{ flex: 1 }} />
+      <Ionicons key="create-forward-icon" name="chevron-forward" size={24} color="#DDD" />
+    </TouchableOpacity>
+  );
+
   return (
     <Modal
       visible={visible}
@@ -50,6 +151,7 @@ const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
     >
       <View style={styles.modalContainer}>
         <TouchableOpacity
+          key="overlay"
           style={styles.overlay}
           activeOpacity={1}
           onPress={onClose}
@@ -65,78 +167,13 @@ const ProfileBottomSheet: React.FC<ProfileBottomSheetProps> = ({
           <ScrollView showsVerticalScrollIndicator={false}>
             {/* Section "Mon compte" toujours visible */}
             <Text style={styles.sectionTitle}>Mon compte</Text>
-            <TouchableOpacity
-              style={[
-                styles.profileItem,
-                activeProfile.id === currentProfile.id && styles.activeProfileItem
-              ]}
-              onPress={() => {
-                onSelectProfile(currentProfile.id);
-                onClose();
-              }}
-            >
-              <Image
-                source={{ uri: currentProfile.avatar }}
-                style={styles.avatar}
-              />
-              <View style={styles.profileInfo}>
-                <Text style={styles.profileName}>{currentProfile.name}</Text>
-                <Text style={styles.profileUsername}>{currentProfile.username}</Text>
-              </View>
-              <Text style={styles.balance}>{currentProfile.balance} €</Text>
-              {activeProfile.id === currentProfile.id && (
-                <View style={styles.checkmarkContainer}>
-                  <Ionicons name="checkmark-circle" size={24} color="#4285F4" />
-                </View>
-              )}
-              <Ionicons name="chevron-forward" size={24} color="#DDD" />
-            </TouchableOpacity>
+            {renderMainProfile()}
 
             {/* Section "Mes comptes gérés" toujours visible si des comptes existent */}
-            {managedAccounts.length > 0 && (
-              <>
-                <Text style={styles.sectionTitle}>Mes comptes gérés</Text>
-                {managedAccounts.map((account) => (
-                  <TouchableOpacity
-                    key={account.id}
-                    style={[
-                      styles.profileItem,
-                      activeProfile.id === account.id && styles.activeProfileItem
-                    ]}
-                    onPress={() => {
-                      onSelectProfile(account.id);
-                      onClose();
-                    }}
-                  >
-                    <Image
-                      source={{ uri: account.avatar }}
-                      style={styles.avatar}
-                    />
-                    <View style={styles.profileInfo}>
-                      <Text style={styles.profileName}>{account.name}</Text>
-                      <Text style={styles.profileUsername}>{account.username}</Text>
-                    </View>
-                    <Text style={styles.balance}>{account.balance} €</Text>
-                    {activeProfile.id === account.id && (
-                      <View style={styles.checkmarkContainer}>
-                        <Ionicons name="checkmark-circle" size={24} color="#4285F4" />
-                      </View>
-                    )}
-                    <Ionicons name="chevron-forward" size={24} color="#DDD" />
-                  </TouchableOpacity>
-                ))}
-              </>
-            )}
+            {renderManagedAccounts()}
 
             {/* Bouton pour créer un nouveau compte */}
-            <TouchableOpacity style={styles.createAccountButton}>
-              <View style={styles.addIconContainer}>
-                <Ionicons name="add" size={24} color="#999" />
-              </View>
-              <Text style={styles.createAccountText}>Créer un nouveau</Text>
-              <View style={{ flex: 1 }} />
-              <Ionicons name="chevron-forward" size={24} color="#DDD" />
-            </TouchableOpacity>
+            {renderCreateAccountButton()}
           </ScrollView>
         </View>
       </View>

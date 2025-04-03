@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,41 +7,67 @@ import {
   Image,
   ScrollView,
   SafeAreaView,
-  StatusBar
+  StatusBar,
+  ActivityIndicator
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { Ionicons } from '@expo/vector-icons';
 import { toast } from 'sonner-native';
+import { useWishlist } from '../context/WishlistContext';
 
 type WishlistSettingsScreenRouteProp = RouteProp<RootStackParamList, 'WishlistSettings'>;
 
 const WishlistSettingsScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<WishlistSettingsScreenRouteProp>();
+  const { getWishlist, editWishlist, addWishlist } = useWishlist();
+  const { wishlistId, pendingWishlist } = route.params;
   
-  // Get wishlist data from route params or use default
-  const wishlistData = route.params?.wishlistData || {
-    id: '2',
-    title: 'Mes favoris',
-    description: 'Ma liste de favoris du moment',
-    image: 'https://api.a0.dev/assets/image?text=coffee%20beans%20different%20varieties&aspect=1:1&seed=789',
-    isPublic: true,
-    isFavorite: true
-  };
-
+  // Loading state
+  const [isLoading, setIsLoading] = useState<boolean>(!pendingWishlist);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  
   // State for form fields
-  const [isPublic, setIsPublic] = useState(wishlistData.isPublic);
-  const [isFavorite, setIsFavorite] = useState(wishlistData.isFavorite);
-  const [selectedImage, setSelectedImage] = useState(wishlistData.image);
+  const [title, setTitle] = useState<string>(pendingWishlist?.title || '');
+  const [description, setDescription] = useState<string>(pendingWishlist?.description || '');
+  const [isPublic, setIsPublic] = useState<boolean>(false);
+  const [isFavorite, setIsFavorite] = useState<boolean>(false);
+  const [selectedImage, setSelectedImage] = useState<string>('');
+  const [addAdmins] = useState<boolean>(pendingWishlist?.addAdmins || false);
+  
+  // Load wishlist data if editing existing wishlist
+  useEffect(() => {
+    const loadWishlistData = async () => {
+      if (!wishlistId) return; // Skip if creating new wishlist
+      
+      try {
+        setIsLoading(true);
+        const wishlist = await getWishlist(wishlistId);
+        
+        setTitle(wishlist.title);
+        setDescription(wishlist.description || '');
+        setIsPublic(wishlist.isPublic);
+        setIsFavorite(wishlist.isFavorite);
+        setSelectedImage(wishlist.coverImage || '');
+      } catch (error) {
+        console.error('Error loading wishlist', error);
+        toast.error('Erreur lors du chargement de la wishlist');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadWishlistData();
+  }, [wishlistId]);
 
   // Images disponibles pour la sélection
   const imageOptions = [
     { id: 'search', icon: <Ionicons name="search" size={40} color="#888" /> },
-    { 
-      id: 'coffee', 
-      image: 'https://api.a0.dev/assets/image?text=coffee%20beans%20different%20varieties&aspect=1:1&seed=789' 
+    {
+      id: 'coffee',
+      image: 'https://api.a0.dev/assets/image?text=coffee%20beans%20different%20varieties&aspect=1:1&seed=789'
     },
     { id: 'empty1', isTransparent: true },
     { id: 'empty2', isTransparent: true }
@@ -51,10 +77,69 @@ const WishlistSettingsScreen: React.FC = () => {
     navigation.goBack();
   };
 
-  const handleSave = () => {
-    // In a real app, save changes to backend
-    toast.success('Modifications enregistrées');
-    navigation.goBack();
+  const handleSave = async () => {
+    try {
+      console.log('WishlistSettingsScreen - handleSave called');
+      setIsSaving(true);
+      
+      if (wishlistId) {
+        console.log('WishlistSettingsScreen - Editing existing wishlist with ID:', wishlistId);
+        // Edit existing wishlist
+        await editWishlist(wishlistId, {
+          coverImage: selectedImage,
+          isPublic,
+          isFavorite
+        });
+        toast.success('Modifications enregistrées');
+      } else if (pendingWishlist) {
+        console.log('WishlistSettingsScreen - Creating new wishlist with title:', pendingWishlist.title);
+        console.log('Server API configuration: Using endpoint /wishlists with data:',
+          JSON.stringify({
+            title: pendingWishlist.title,
+            description: pendingWishlist.description,
+            coverImage: selectedImage,
+            isPublic,
+            isFavorite
+          }));
+          
+        // Create new wishlist
+        try {
+          const newWishlist = await addWishlist({
+            title: pendingWishlist.title,
+            description: pendingWishlist.description,
+            coverImage: selectedImage,
+            isPublic,
+            isFavorite
+          });
+          
+          console.log('WishlistSettingsScreen - Wishlist created successfully:', newWishlist?.id);
+          
+          // Handle admins separately if needed
+          if (pendingWishlist.addAdmins) {
+            // TODO: Add logic to handle admins through a separate API call
+            console.log('Admin handling will be implemented');
+          }
+          toast.success('Liste de souhaits créée');
+        } catch (error) {
+          console.error('WishlistSettingsScreen - Specific error creating wishlist:', error);
+          // Type assertion to access axios error properties more safely
+          const axiosError = error as { response?: { data?: any, status?: number }, config?: { url?: string } };
+          console.error('API Error details:', axiosError.response?.data || 'No response data');
+          console.error('API Error status:', axiosError.response?.status || 'No status');
+          console.error('API Error URL:', axiosError.config?.url || 'No URL info');
+          toast.error('Erreur lors de la création de la liste. Vérifiez les logs pour plus de détails.');
+          throw error; // Re-throw to trigger the error handling below
+        }
+      }
+      
+      console.log('WishlistSettingsScreen - Navigating back after save');
+      navigation.goBack();
+    } catch (error) {
+      console.error('WishlistSettingsScreen - Error saving wishlist:', error);
+      toast.error('Erreur lors de l\'enregistrement');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const togglePublic = () => {
@@ -71,8 +156,25 @@ const WishlistSettingsScreen: React.FC = () => {
     }
   };
 
+  // Show loading state
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: 'white' }}>
+        <SafeAreaView style={[styles.container, styles.loadingContainer]}>
+          <ActivityIndicator size="large" color="#000" />
+          <Text style={styles.loadingText}>Chargement des paramètres...</Text>
+        </SafeAreaView>
+      </View>
+    );
+  }
+  
+  // Log pour le débogage - pour vérifier que le composant a reçu les props correctes
+  console.log('WishlistSettingsScreen rendering with params:', { wishlistId, pendingWishlist });
+
+  // Render with a more robust approach
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={{ flex: 1, backgroundColor: 'white' }}>
+    <SafeAreaView style={[styles.container, { backgroundColor: 'white' }]}>
       <StatusBar barStyle="dark-content" />
       
       {/* Header */}
@@ -80,7 +182,9 @@ const WishlistSettingsScreen: React.FC = () => {
         <TouchableOpacity onPress={handleBack}>
           <Ionicons name="close" size={32} color="black" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Paramètres de liste</Text>
+        <Text style={styles.headerTitle}>
+          {wishlistId ? 'Paramètres de liste' : 'Finaliser la liste'}
+        </Text>
         <TouchableOpacity>
           <View style={styles.helpCircle}>
             <Text style={styles.helpText}>?</Text>
@@ -153,16 +257,27 @@ const WishlistSettingsScreen: React.FC = () => {
 
       {/* Bottom Buttons */}
       <View style={styles.bottomButtons}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack} disabled={isSaving}>
           <Ionicons name="arrow-back" size={24} color="#888" />
           <Text style={styles.backButtonText}>Retour</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-          <Text style={styles.saveButtonText}>Enregistrer</Text>
+        <TouchableOpacity 
+          style={[styles.saveButton, isSaving && styles.saveButtonDisabled]} 
+          onPress={handleSave}
+          disabled={isSaving}
+        >
+          {isSaving ? (
+            <ActivityIndicator size="small" color="white" />
+          ) : (
+            <Text style={styles.saveButtonText}>
+              {wishlistId ? 'Enregistrer' : 'Créer la liste'}
+            </Text>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
+    </View>
   );
 };
 
@@ -170,6 +285,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: 'white',
+    // Assurez-vous que le conteneur prend tout l'écran
+    width: '100%',
+    height: '100%',
+  },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 15,
+    fontSize: 16,
+    color: '#666',
   },
   header: {
     flexDirection: 'row',
@@ -302,6 +429,12 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     paddingHorizontal: 30,
     borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 150,
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#999',
   },
   saveButtonText: {
     color: 'white',

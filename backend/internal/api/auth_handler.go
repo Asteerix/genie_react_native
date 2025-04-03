@@ -2,10 +2,12 @@ package api
 
 import (
 	"net/http"
+	"path/filepath"
+	"strings"
 
-	"github.com/asteerix/auth-backend/internal/auth"
-	"github.com/asteerix/auth-backend/internal/middleware"
-	"github.com/asteerix/auth-backend/internal/models"
+	"genie/internal/auth"
+	"genie/internal/middleware"
+	"genie/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 )
@@ -44,6 +46,7 @@ func (h *AuthHandler) RegisterRoutes(router *gin.RouterGroup) {
 			secured.PUT("/profile", h.UpdateProfile)         // Mise à jour du profil
 			secured.POST("/avatar", h.SetAvatar)             // Mise à jour de l'avatar
 			secured.POST("/profile-picture", h.SetProfilePicture) // Mise à jour de la photo de profil
+			secured.POST("/upload", h.UploadImage)           // Upload d'image (pour avatar ou photo de profil)
 		}
 	}
 }
@@ -306,4 +309,60 @@ func (h *AuthHandler) SetProfilePicture(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Photo de profil mise à jour avec succès"})
+}
+
+// UploadImage télécharge et stocke une image pour l'utilisateur
+func (h *AuthHandler) UploadImage(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Non authentifié"})
+		return
+	}
+
+	// Récupérer le type d'image (avatar ou profilePicture)
+	imageType := c.PostForm("type")
+	if imageType != "avatar" && imageType != "profilePicture" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Type d'image invalide. Utiliser 'avatar' ou 'profilePicture'"})
+		return
+	}
+
+	// Récupérer le fichier
+	file, header, err := c.Request.FormFile("image")
+	if err != nil {
+		log.Error().Err(err).Msg("Erreur lors de la récupération du fichier")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Fichier d'image requis"})
+		return
+	}
+	defer file.Close()
+
+	// Vérifier le type de fichier
+	if !isValidImageType(header.Filename) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Format d'image non supporté. Utilisez JPG, PNG ou JPEG"})
+		return
+	}
+
+	// Traiter et stocker l'image
+	imageURL, err := h.authService.UploadUserImage(c.Request.Context(), userID, imageType, file, header)
+	if err != nil {
+		log.Error().Err(err).Msg("Erreur lors du téléchargement de l'image")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur lors du téléchargement de l'image: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Image téléchargée avec succès",
+		"url":     imageURL,
+	})
+}
+
+// isValidImageType vérifie si le type de fichier est une image valide
+func isValidImageType(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	validExts := []string{".jpg", ".jpeg", ".png"}
+	for _, validExt := range validExts {
+		if ext == validExt {
+			return true
+		}
+	}
+	return false
 }

@@ -22,7 +22,7 @@ const PaymentConfirmationScreen: React.FC = () => {
     navigation.goBack();
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     // Convertir le montant en nombre
     const amountNumber = parseFloat(amount) || 0;
     
@@ -34,9 +34,9 @@ const PaymentConfirmationScreen: React.FC = () => {
     // Commencer le traitement
     setIsProcessing(true);
     
-    // Effectuer le transfert via le context
-    setTimeout(() => {
-      const success = transferFunds(amountNumber, recipient.id);
+    try {
+      // Effectuer le transfert via le context
+      const success = await transferFunds(amountNumber, recipient.id);
       
       if (success) {
         setIsProcessing(false);
@@ -50,7 +50,11 @@ const PaymentConfirmationScreen: React.FC = () => {
         setIsProcessing(false);
         alert('Erreur lors du transfert. Veuillez vérifier votre solde et réessayer.');
       }
-    }, 1000);
+    } catch (error) {
+      console.error("Erreur pendant le transfert:", error);
+      setIsProcessing(false);
+      alert('Une erreur est survenue lors du transfert. Veuillez réessayer.');
+    }
   };
 
   // Formater le nom de la méthode de paiement

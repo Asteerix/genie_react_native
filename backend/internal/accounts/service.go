@@ -3,14 +3,16 @@ package accounts
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
-	"github.com/asteerix/auth-backend/internal/db"
-	"github.com/asteerix/auth-backend/internal/models"
+	"genie/internal/db"
+	"genie/internal/models"
 	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // Service fournit les fonctionnalités de gestion des comptes gérés
@@ -453,4 +455,335 @@ func (s *Service) SetManagedAccountProfilePicture(ctx context.Context, userID, a
 		Msg("Photo de profil du compte géré mise à jour (avatar réinitialisé)")
 
 	return nil
+}
+
+// GetUserBalance récupère le solde actuel d'un utilisateur
+func (s *Service) GetUserBalance(ctx context.Context, userID string) (float64, error) {
+	// Convertir l'ID utilisateur en ObjectID
+	ownerID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return 0, errors.New("ID utilisateur invalide")
+	}
+
+	// Récupérer l'utilisateur pour obtenir son solde
+	var user models.User
+	err = s.db.Users.FindOne(ctx, bson.M{"_id": ownerID}).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return 0, errors.New("utilisateur non trouvé")
+		}
+		log.Error().Err(err).Str("userID", userID).Msg("Erreur lors de la récupération de l'utilisateur")
+		return 0, err
+	}
+
+	return user.Balance, nil
+}
+
+// AddFunds ajoute des fonds au solde d'un utilisateur
+func (s *Service) AddFunds(ctx context.Context, userID string, amount float64) (float64, error) {
+	if amount <= 0 {
+		return 0, errors.New("le montant doit être supérieur à 0")
+	}
+
+	// Convertir l'ID utilisateur en ObjectID
+	ownerID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return 0, errors.New("ID utilisateur invalide")
+	}
+
+	now := time.Now()
+
+	// Mettre à jour le solde de l'utilisateur
+	result := s.db.Users.FindOneAndUpdate(
+		ctx,
+		bson.M{"_id": ownerID},
+		bson.M{
+			"$inc": bson.M{"balance": amount},
+			"$set": bson.M{"updatedAt": now},
+		},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	)
+
+	if result.Err() != nil {
+		if result.Err() == mongo.ErrNoDocuments {
+			return 0, errors.New("utilisateur non trouvé")
+		}
+		log.Error().Err(result.Err()).Str("userID", userID).Float64("amount", amount).Msg("Erreur lors de l'ajout de fonds")
+		return 0, result.Err()
+	}
+
+	var updatedUser models.User
+	if err := result.Decode(&updatedUser); err != nil {
+		log.Error().Err(err).Str("userID", userID).Msg("Erreur lors du décodage de l'utilisateur mis à jour")
+		return 0, err
+	}
+
+	// Créer une transaction pour l'ajout de fonds
+	transaction := models.Transaction{
+		ID:          primitive.NewObjectID(),
+		UserID:      ownerID,
+		Amount:      amount,
+		Type:        "CREDIT",
+		Description: "Ajout de fonds",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	_, err = s.db.Transactions.InsertOne(ctx, transaction)
+	if err != nil {
+		log.Error().Err(err).Str("userID", userID).Float64("amount", amount).Msg("Erreur lors de l'enregistrement de la transaction")
+		// On retourne quand même le solde mis à jour même si la transaction n'a pas pu être enregistrée
+	}
+
+	return updatedUser.Balance, nil
+}
+
+// TransferFunds transfère des fonds d'un utilisateur à un autre
+func (s *Service) TransferFunds(ctx context.Context, senderID, recipientID string, amount float64, isManagedAccount bool) (float64, error) {
+	if amount <= 0 {
+		return 0, errors.New("le montant doit être supérieur à 0")
+	}
+
+	// Convertir les IDs en ObjectID
+	senderObjID, err := primitive.ObjectIDFromHex(senderID)
+	if err != nil {
+		return 0, errors.New("ID expéditeur invalide")
+	}
+
+	recipientObjID, err := primitive.ObjectIDFromHex(recipientID)
+	if err != nil {
+		return 0, errors.New("ID destinataire invalide")
+	}
+
+	// Vérifier que l'expéditeur a suffisamment de fonds
+	var sender models.User
+	err = s.db.Users.FindOne(ctx, bson.M{"_id": senderObjID}).Decode(&sender)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return 0, errors.New("expéditeur non trouvé")
+		}
+		log.Error().Err(err).Str("senderID", senderID).Msg("Erreur lors de la récupération de l'expéditeur")
+		return 0, err
+	}
+
+	if sender.Balance < amount {
+		return 0, errors.New("solde insuffisant")
+	}
+
+	now := time.Now()
+
+	// Préparer les informations du destinataire pour la transaction
+	var recipientName, recipientAvatar string
+
+	if isManagedAccount {
+		// Récupérer le compte géré
+		var managedAccount models.ManagedAccount
+		err = s.db.ManagedAccounts.FindOne(ctx, bson.M{"_id": recipientObjID}).Decode(&managedAccount)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				return 0, errors.New("compte géré non trouvé")
+			}
+			log.Error().Err(err).Str("recipientID", recipientID).Msg("Erreur lors de la récupération du compte géré")
+			return 0, err
+		}
+		recipientName = fmt.Sprintf("%s %s", managedAccount.FirstName, managedAccount.LastName)
+		recipientAvatar = managedAccount.AvatarURL
+		if recipientAvatar == "" {
+			recipientAvatar = managedAccount.ProfilePictureURL
+		}
+	} else {
+		// Récupérer l'utilisateur destinataire
+		var recipient models.User
+		err = s.db.Users.FindOne(ctx, bson.M{"_id": recipientObjID}).Decode(&recipient)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				return 0, errors.New("destinataire non trouvé")
+			}
+			log.Error().Err(err).Str("recipientID", recipientID).Msg("Erreur lors de la récupération du destinataire")
+			return 0, err
+		}
+		recipientName = fmt.Sprintf("%s %s", recipient.FirstName, recipient.LastName)
+		recipientAvatar = recipient.AvatarURL
+		if recipientAvatar == "" {
+			recipientAvatar = recipient.ProfilePictureURL
+		}
+
+		// Mettre à jour le solde du destinataire si ce n'est pas un compte géré
+		_, err = s.db.Users.UpdateOne(
+			ctx,
+			bson.M{"_id": recipientObjID},
+			bson.M{
+				"$inc": bson.M{"balance": amount},
+				"$set": bson.M{"updatedAt": now},
+			},
+		)
+		if err != nil {
+			log.Error().Err(err).Str("recipientID", recipientID).Float64("amount", amount).Msg("Erreur lors de la mise à jour du solde du destinataire")
+			return 0, err
+		}
+
+		// Créer une transaction de crédit pour le destinataire
+		recipientTransaction := models.Transaction{
+			ID:              primitive.NewObjectID(),
+			UserID:          recipientObjID,
+			Amount:          amount,
+			Type:            "CREDIT",
+			Description:     fmt.Sprintf("Transfert reçu de %s %s", sender.FirstName, sender.LastName),
+			RecipientID:     senderObjID,
+			RecipientName:   fmt.Sprintf("%s %s", sender.FirstName, sender.LastName),
+			RecipientAvatar: sender.AvatarURL,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+
+		_, err = s.db.Transactions.InsertOne(ctx, recipientTransaction)
+		if err != nil {
+			log.Error().Err(err).Str("recipientID", recipientID).Float64("amount", amount).Msg("Erreur lors de l'enregistrement de la transaction du destinataire")
+			// Continuer malgré l'erreur
+		}
+	}
+
+	// Mettre à jour le solde de l'expéditeur
+	result := s.db.Users.FindOneAndUpdate(
+		ctx,
+		bson.M{"_id": senderObjID},
+		bson.M{
+			"$inc": bson.M{"balance": -amount},
+			"$set": bson.M{"updatedAt": now},
+		},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	)
+
+	if result.Err() != nil {
+		log.Error().Err(result.Err()).Str("senderID", senderID).Float64("amount", amount).Msg("Erreur lors de la mise à jour du solde de l'expéditeur")
+		return 0, result.Err()
+	}
+
+	var updatedSender models.User
+	if err := result.Decode(&updatedSender); err != nil {
+		log.Error().Err(err).Str("senderID", senderID).Msg("Erreur lors du décodage de l'expéditeur mis à jour")
+		return 0, err
+	}
+
+	// Créer une transaction de débit pour l'expéditeur
+	senderTransaction := models.Transaction{
+		ID:               primitive.NewObjectID(),
+		UserID:           senderObjID,
+		Amount:           amount,
+		Type:             "DEBIT",
+		Description:      fmt.Sprintf("Transfert à %s", recipientName),
+		RecipientID:      recipientObjID,
+		RecipientName:    recipientName,
+		RecipientAvatar:  recipientAvatar,
+		IsManagedAccount: isManagedAccount,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+
+	_, err = s.db.Transactions.InsertOne(ctx, senderTransaction)
+	if err != nil {
+		log.Error().Err(err).Str("senderID", senderID).Float64("amount", amount).Msg("Erreur lors de l'enregistrement de la transaction de l'expéditeur")
+		// On retourne quand même le solde mis à jour même si la transaction n'a pas pu être enregistrée
+	}
+
+	return updatedSender.Balance, nil
+}
+
+// GetUserTransactions récupère l'historique des transactions d'un utilisateur
+func (s *Service) GetUserTransactions(ctx context.Context, userID string, limit, offset int64) (*models.TransactionListResponse, error) {
+	// Convertir l'ID utilisateur en ObjectID
+	ownerID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, errors.New("ID utilisateur invalide")
+	}
+
+	// Vérifier que l'utilisateur existe
+	var user models.User
+	err = s.db.Users.FindOne(ctx, bson.M{"_id": ownerID}).Decode(&user)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, errors.New("utilisateur non trouvé")
+		}
+		log.Error().Err(err).Str("userID", userID).Msg("Erreur lors de la récupération de l'utilisateur")
+		return nil, err
+	}
+
+	// Compter le nombre total de transactions pour cet utilisateur
+	total, err := s.db.Transactions.CountDocuments(ctx, bson.M{"userId": ownerID})
+	if err != nil {
+		log.Error().Err(err).Str("userID", userID).Msg("Erreur lors du comptage des transactions")
+		return nil, err
+	}
+
+	// Si aucune transaction, retourner une liste vide
+	if total == 0 {
+		return &models.TransactionListResponse{
+			Transactions: []models.TransactionResponse{},
+			Total:        0,
+		}, nil
+	}
+
+	// Récupérer les transactions avec pagination et tri par date de création (descendant)
+	findOptions := options.Find().
+		SetSort(bson.M{"createdAt": -1}).
+		SetSkip(offset).
+		SetLimit(limit)
+
+	cursor, err := s.db.Transactions.Find(ctx, bson.M{"userId": ownerID}, findOptions)
+	if err != nil {
+		log.Error().Err(err).Str("userID", userID).Msg("Erreur lors de la récupération des transactions")
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	// Décoder les résultats
+	var transactions []models.Transaction
+	if err := cursor.All(ctx, &transactions); err != nil {
+		log.Error().Err(err).Str("userID", userID).Msg("Erreur lors du décodage des transactions")
+		return nil, err
+	}
+
+	// Convertir en réponses
+	var responses []models.TransactionResponse
+	for _, transaction := range transactions {
+		responses = append(responses, transaction.ToResponse())
+	}
+
+	return &models.TransactionListResponse{
+		Transactions: responses,
+		Total:        total,
+	}, nil
+}
+
+// GetTransactionDetails récupère les détails d'une transaction spécifique
+func (s *Service) GetTransactionDetails(ctx context.Context, userID, transactionID string) (*models.TransactionResponse, error) {
+	// Convertir les IDs en ObjectID
+	ownerID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return nil, errors.New("ID utilisateur invalide")
+	}
+
+	transID, err := primitive.ObjectIDFromHex(transactionID)
+	if err != nil {
+		return nil, errors.New("ID de transaction invalide")
+	}
+
+	// Récupérer la transaction spécifique pour cet utilisateur
+	var transaction models.Transaction
+	err = s.db.Transactions.FindOne(ctx, bson.M{
+		"_id":    transID,
+		"userId": ownerID,
+	}).Decode(&transaction)
+
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, errors.New("transaction non trouvée ou non autorisée")
+		}
+		log.Error().Err(err).Str("userID", userID).Str("transactionID", transactionID).Msg("Erreur lors de la récupération de la transaction")
+		return nil, err
+	}
+
+	// Convertir en réponse
+	response := transaction.ToResponse()
+	return &response, nil
 }

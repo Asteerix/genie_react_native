@@ -1,245 +1,245 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, Platform, Animated } from 'react-native';
-import { Ionicons, Feather, FontAwesome } from '@expo/vector-icons';
+import React, { memo } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+  Platform,
+  Dimensions,
+  SafeAreaView
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../auth/context/AuthContext';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
+import { Entypo, FontAwesome5, Ionicons } from '@expo/vector-icons';
 
 interface BottomTabBarProps {
   activeTab?: string;
 }
 
-// Tab color configuration
-const TAB_COLORS = {
-  wishes: '#FF2D55',
-  events: '#FF9500',
-  add: '#000000',
-  friends: '#007AFF',
-  profile: '#5856D6'
+// Constantes pour les dimensions et le design
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const IS_IPHONE_X = Platform.OS === 'ios' && 
+                    (Dimensions.get('window').height >= 812 || 
+                     Dimensions.get('window').width >= 812);
+const BOTTOM_INSET = IS_IPHONE_X ? 34 : Platform.OS === 'ios' ? 20 : 0;
+const TAB_HEIGHT = 56; // Hauteur fixe de la barre sans les insets
+
+// Thème avec design system pro
+const THEME = {
+  colors: {
+    shopping: '#FF2D55',
+    events: '#FF9500',
+    friends: '#007AFF',
+    profile: '#5856D6',
+    tabBackground: '#FFFFFF',
+    tabBorder: '#EEEEEE',
+    tabInactive: '#8E8E93',
+    shadow: '#000000'
+  }
 };
 
-const BottomTabBar: React.FC<BottomTabBarProps> = ({ activeTab = 'home' }) => {
+/**
+ * BottomTabBar - Composant de navigation inférieure professionnel
+ * 
+ * @param {BottomTabBarProps} props - Les propriétés du composant
+ * @returns {React.ReactElement} - Le composant rendu
+ */
+const BottomTabBar: React.FC<BottomTabBarProps> = memo(({ activeTab = 'shopping' }) => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user } = useAuth();
-
-  // Placeholder avatar URL for all users since the User type doesn't include avatar
   const defaultAvatar = 'https://api.a0.dev/assets/image?text=avatar%20profile%20portrait&aspect=1:1';
-  const avatarUrl = defaultAvatar;
   
+  /**
+   * Gère la navigation entre les écrans
+   * @param {string} screen - L'écran de destination
+   */
   const handleNavigate = (screen: string) => {
-    // Don't navigate if we're already on this screen
     if (screen === activeTab) return;
     
     switch(screen) {
-      case 'wishes':
-        navigation.navigate('Wishlist');
+      case 'shopping':
+        navigation.reset({ index: 0, routes: [{ name: 'HomePage' }] });
         break;
       case 'events':
-        navigation.navigate('Events');
-        break;
-      case 'add':
-        navigation.navigate('AddWish');
+        navigation.reset({ index: 0, routes: [{ name: 'Events' }] });
         break;
       case 'friends':
-        navigation.navigate('Friends');
+        navigation.reset({ index: 0, routes: [{ name: 'Friends' }] });
         break;
       case 'profile':
-        navigation.navigate('Profile');
+        navigation.reset({ index: 0, routes: [{ name: 'Profile', params: {} }] }); // Garder les params vides
         break;
-      default:
-        navigation.navigate('AddWish');
     }
   };
 
-  const renderTabIcon = (tab: string) => {
+  /**
+   * Détermine les couleurs et styles pour un onglet spécifique
+   * @param {string} tab - L'identifiant de l'onglet
+   * @returns {object} - Les propriétés de style pour l'onglet
+   */
+  const getTabProps = (tab: string) => {
     const isActive = activeTab === tab;
-    const color = isActive ? TAB_COLORS[tab as keyof typeof TAB_COLORS] : '#888';
-    const size = isActive ? 26 : 24;
+    const color = isActive 
+      ? THEME.colors[tab as keyof typeof THEME.colors] 
+      : THEME.colors.tabInactive;
     
-    switch(tab) {
-      case 'wishes':
-        return (
-          <Ionicons
-            name={isActive ? "heart" : "heart-outline"}
-            size={size}
-            color={color}
-          />
-        );
-      case 'events':
-        return (
-          <FontAwesome
-            name="birthday-cake"
-            size={size - 2}
-            color={color}
-          />
-        );
-      case 'friends':
-        return (
-          <Ionicons
-            name={isActive ? "people" : "people-outline"}
-            size={size}
-            color={color}
-          />
-        );
-      case 'profile':
-        return (
-          <Ionicons
-            name={isActive ? "person" : "person-outline"}
-            size={size - 2}
-            color={color}
-          />
-        );
-      default:
-        return null;
-    }
+    return { isActive, color };
   };
+
+  // Tableau de configuration des onglets
+  const tabs = [
+    {
+      id: 'shopping',
+      label: 'Shopping',
+      icon: ({ color, isActive }: { color: string, isActive: boolean }) => (
+        <FontAwesome5 name="store" size={20} color={color} solid={isActive} />
+      )
+    },
+    {
+      id: 'events',
+      label: 'Événements',
+      icon: ({ color, isActive }: { color: string, isActive: boolean }) => (
+        <Entypo name="calendar" size={20} color={color} />
+      )
+    },
+    {
+      id: 'friends',
+      label: 'Amis',
+      icon: ({ color, isActive }: { color: string, isActive: boolean }) => (
+        <Ionicons name={isActive ? "people" : "people-outline"} size={22} color={color} />
+      )
+    },
+    {
+      id: 'profile',
+      label: 'Profil',
+      icon: ({ color, isActive }: { color: string, isActive: boolean }) => (
+        <View style={[styles.avatarWrapper, isActive && { borderColor: color, borderWidth: 2 }]}>
+          <Image source={{ uri: defaultAvatar }} style={styles.avatar} />
+        </View>
+      )
+    }
+  ];
 
   return (
-    <View style={styles.container}>
-      {['wishes', 'events', 'add', 'friends', 'profile'].map((tab) => {
-        if (tab === 'add') {
+    <View style={styles.container} testID="bottom-tab-bar">
+      <View style={styles.content}>
+        {tabs.map((tab) => {
+          const { isActive, color } = getTabProps(tab.id);
+          
           return (
             <TouchableOpacity
-              key={tab}
-              style={styles.centerButton}
-              onPress={() => handleNavigate('add')}
-              activeOpacity={0.8}
+              key={tab.id}
+              style={styles.tab}
+              activeOpacity={0.7}
+              onPress={() => handleNavigate(tab.id)}
+              testID={`tab-${tab.id}`}
             >
-              <View style={styles.plusButton}>
-                <Feather name="plus" size={30} color="white" />
+              <View style={styles.tabContent}>
+                {tab.icon({ color, isActive })}
+                
+                <Text
+                  style={[
+                    styles.tabLabel,
+                    { color },
+                    isActive && styles.activeTabLabel
+                  ]}
+                  numberOfLines={1}
+                >
+                  {tab.label}
+                </Text>
+                
+                {isActive && (
+                  <View 
+                    style={[
+                      styles.indicator, 
+                      { backgroundColor: color }
+                    ]} 
+                  />
+                )}
               </View>
             </TouchableOpacity>
           );
-        }
-        
-        const isActive = activeTab === tab;
-        const tabColor = TAB_COLORS[tab as keyof typeof TAB_COLORS];
-        
-        return (
-          <TouchableOpacity
-            key={tab}
-            style={[
-              styles.tabItem,
-              isActive && styles.activeTabItem
-            ]}
-            onPress={() => handleNavigate(tab)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.tabContent}>
-              {renderTabIcon(tab)}
-              <Text
-                style={[
-                  styles.tabLabel,
-                  isActive && [styles.activeTabLabel, { color: tabColor }]
-                ]}
-                numberOfLines={1}
-              >
-                {tab === 'wishes' && 'Vœux'}
-                {tab === 'events' && 'Événements'}
-                {tab === 'friends' && 'Amis'}
-                {tab === 'profile' && 'Profil'}
-              </Text>
-              
-              {isActive && (
-                <View style={[styles.activeIndicator, { backgroundColor: tabColor }]} />
-              )}
-            </View>
-          </TouchableOpacity>
-        );
-      })}
+        })}
+      </View>
+      
+      {/* Safe area pour les iPhones avec notch */}
+      {IS_IPHONE_X && <View style={styles.bottomInset} />}
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
-    flexDirection: 'row',
-    height: 80,
-    backgroundColor: 'white',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: THEME.colors.tabBackground,
     borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-    paddingBottom: Platform.OS === 'ios' ? 20 : 10,
-    paddingTop: 10,
-    paddingHorizontal: 10,
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    borderTopColor: THEME.colors.tabBorder,
+    width: SCREEN_WIDTH,
+    zIndex: 999,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
+        shadowColor: THEME.colors.shadow,
         shadowOffset: { width: 0, height: -3 },
-        shadowOpacity: 0.07,
-        shadowRadius: 5,
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
       },
       android: {
-        elevation: 10,
+        elevation: 8,
       },
     }),
   },
-  tabItem: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    height: '100%',
-    paddingHorizontal: 4,
+  content: {
+    flexDirection: 'row',
+    height: TAB_HEIGHT,
+    width: '100%',
   },
-  activeTabItem: {
-    transform: [{ translateY: -5 }],
+  bottomInset: {
+    height: BOTTOM_INSET,
+    backgroundColor: THEME.colors.tabBackground,
+  },
+  tab: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: TAB_HEIGHT,
   },
   tabContent: {
     alignItems: 'center',
     justifyContent: 'center',
+    height: '100%',
     width: '100%',
-  },
-  centerButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: -35,
-  },
-  plusButton: {
-    width: 65,
-    height: 65,
-    borderRadius: 32.5,
-    backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 5 },
-        shadowOpacity: 0.35,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 10,
-      },
-    }),
+    paddingTop: 6,
+    paddingBottom: 6,
   },
   tabLabel: {
     fontSize: 11,
-    marginTop: 5,
-    color: '#888',
+    lineHeight: 14,
     fontWeight: '500',
+    marginTop: 4,
     textAlign: 'center',
   },
   activeTabLabel: {
-    fontSize: 12,
     fontWeight: '700',
   },
-  activeIndicator: {
+  indicator: {
     position: 'absolute',
-    bottom: -8,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginTop: 4,
+    bottom: 0,
+    width: 20,
+    height: 3,
+    borderRadius: 1.5,
   },
-  avatarContainer: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  avatarWrapper: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     overflow: 'hidden',
+    backgroundColor: '#EFEFEF',
   },
   avatar: {
     width: '100%',

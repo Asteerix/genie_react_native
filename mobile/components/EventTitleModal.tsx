@@ -5,20 +5,25 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
-  Modal,
   SafeAreaView,
   KeyboardAvoidingView,
   Platform,
   Keyboard,
   Animated,
-  PanResponder,
+  PanResponder, // Garder si l'effet de swipe est souhaité
   Dimensions,
   StatusBar,
   ScrollView,
   FlatList
 } from 'react-native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { BlurView } from 'expo-blur'; // Garder si l'effet est souhaité pour le fond
+import { toast } from 'sonner-native';
+import _ from 'lodash';
+import { Event } from '../api/events'; // Importer le type Event
+import { RootStackParamList } from '../types/navigation'; // Importer RootStackParamList
 
 // Types d'événements importés de l'app
 type EventType = 'collectif' | 'individuel' | 'special';
@@ -32,17 +37,12 @@ interface TitleSuggestion {
   eventType: EventType | 'all'; // Pour filtrer si c'est pour collectif ou individuel
 }
 
-// Propriétés du modal
-interface EventTitleModalProps {
-  visible: boolean;
-  onClose: () => void;
-  onBack: () => void;
-  onContinue: (title: string) => void;
-  initialTitle?: string;
-  isLoading?: boolean;
-  maxLength?: number;
-  eventType?: EventType;
-}
+// Type pour les paramètres de la route
+type EventTitleRouteProp = RouteProp<RootStackParamList, 'EventTitleModal'>;
+
+// Type pour la navigation
+type EventTitleNavigationProp = StackNavigationProp<RootStackParamList>;
+
 
 // Dimensions de l'écran
 const { width, height } = Dimensions.get('window');
@@ -99,33 +99,22 @@ const ALL_SUGGESTIONS = Object.values(CREATIVE_SUGGESTIONS).flat();
 
 // Idées créatives pour les placeholders (adaptées pour Amazon)
 const CREATIVE_PLACEHOLDERS = [
-  "Renouvellement Setup Gaming",
-  "Collection Livres Fantasy",
-  "Équipement Cuisine Pro",
-  "Essentiels Tech Étudiant",
-  "Déco Bureau Ergonomique",
-  "Collection Vinyles",
-  "Équipement Randonnée",
-  "Accessoires Photo Pro",
-  "Essentiels Jardinage",
-  "Setup Streaming",
-  "Outils Bricolage",
-  "Bibliothèque Enfant",
-  "Équipement Fitness",
-  "Pack Déménagement",
-  "Gadgets Domotique"
+  "Renouvellement Setup Gaming", "Collection Livres Fantasy", "Équipement Cuisine Pro",
+  "Essentiels Tech Étudiant", "Déco Bureau Ergonomique", "Collection Vinyles",
+  "Équipement Randonnée", "Accessoires Photo Pro", "Essentiels Jardinage",
+  "Setup Streaming", "Outils Bricolage", "Bibliothèque Enfant",
+  "Équipement Fitness", "Pack Déménagement", "Gadgets Domotique"
 ];
 
-const EventTitleModal: React.FC<EventTitleModalProps> = ({
-  visible,
-  onClose,
-  onBack,
-  onContinue,
-  initialTitle = '',
-  isLoading = false,
-  maxLength = 50,
-  eventType = 'collectif'
-}) => {
+const EventTitleModal = () => {
+  const navigation = useNavigation<EventTitleNavigationProp>();
+  const route = useRoute<EventTitleRouteProp>();
+
+  // Récupérer les données de l'événement des paramètres de la route
+  const eventDataFromParams = route.params?.eventData || {};
+  const eventType = (eventDataFromParams as any)['type'] || 'collectif'; // Utiliser le type passé ou défaut
+  const initialTitle = (eventDataFromParams as any)['title'] || '';
+
   // États
   const [title, setTitle] = useState(initialTitle);
   const [error, setError] = useState<string | null>(null);
@@ -137,21 +126,22 @@ const EventTitleModal: React.FC<EventTitleModalProps> = ({
   const [activeSuggestionPanel, setActiveSuggestionPanel] = useState(true);
   const [randomPlaceholder, setRandomPlaceholder] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>(CATEGORIES[0]);
-  
+  const [isLoading, setIsLoading] = useState(false); // Garder si besoin pour une future validation API
+
+  const maxLength = 50; // Définir maxLength ici
+
   // Refs
   const titleInputRef = useRef<TextInput>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const categoryScrollRef = useRef<ScrollView>(null);
-  
+
   // Animations
-  const translateY = useRef(new Animated.Value(height)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-  const suggestionScaleMap = useRef<Record<string, Animated.Value>>({}).current;
   const noticeAnimation = useRef(new Animated.Value(0)).current;
-  
+  const suggestionScaleMap = useRef<Record<string, Animated.Value>>({}).current;
+
   // Filtrer les suggestions par type d'événement
   const getFilteredSuggestionsByEventType = useCallback(() => {
-    return ALL_SUGGESTIONS.filter(suggestion => 
+    return ALL_SUGGESTIONS.filter(suggestion =>
       suggestion.eventType === eventType || suggestion.eventType === 'all'
     );
   }, [eventType]);
@@ -162,7 +152,7 @@ const EventTitleModal: React.FC<EventTitleModalProps> = ({
     const categoriesWithSuggestions = new Set(filteredSuggestions.map(s => s.category));
     return CATEGORIES.filter(category => categoriesWithSuggestions.has(category));
   }, [getFilteredSuggestionsByEventType]);
-  
+
   // Initialiser les valeurs d'animation pour chaque suggestion
   useEffect(() => {
     ALL_SUGGESTIONS.forEach(suggestion => {
@@ -172,368 +162,173 @@ const EventTitleModal: React.FC<EventTitleModalProps> = ({
     });
   }, [suggestionScaleMap]);
 
-  // PanResponder pour la gestion des gestes
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return Math.abs(gestureState.dy) > 10 && Math.abs(gestureState.dx) < 50;
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy < 0) return;
-        translateY.setValue(gestureState.dy);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 150) {
-          handleCloseWithAnimation();
-        } else {
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            bounciness: 5
-          }).start();
-        }
-      }
-    })
-  ).current;
-  
-  // Choisir un placeholder aléatoire à l'initialisation
-  useEffect(() => {
+   // Choisir un placeholder aléatoire et focus
+   useEffect(() => {
     const randomIndex = Math.floor(Math.random() * CREATIVE_PLACEHOLDERS.length);
     setRandomPlaceholder(CREATIVE_PLACEHOLDERS[randomIndex]);
-  }, [visible]);
-  
-  // Animation d'entrée
-  const animateIn = useCallback(() => {
-    translateY.setValue(height);
-    opacity.setValue(0);
-    
-    Animated.parallel([
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true
-      }),
-      Animated.spring(translateY, {
-        toValue: 0,
-        damping: 20,
-        stiffness: 90,
-        useNativeDriver: true
-      })
-    ]).start();
-  }, [opacity, translateY]);
-  
-  // Animation de sortie
-  const animateOut = useCallback((callback?: () => void) => {
-    Animated.parallel([
-      Animated.timing(opacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true
-      }),
-      Animated.timing(translateY, {
-        toValue: height,
-        duration: 300,
-        useNativeDriver: true
-      })
-    ]).start(callback);
-  }, [opacity, translateY, height]);
-  
-  // Réinitialiser et animer la modale quand elle devient visible
-  useEffect(() => {
-    if (visible) {
-      setTitle(initialTitle);
-      setError(null);
-      setHasUnsavedChanges(false);
-      animateIn();
-      
-      // Initialiser les suggestions filtrées par type d'événement
-      setFilteredSuggestions(getFilteredSuggestionsByEventType());
-      
-      // Définir la première catégorie avec des suggestions comme active
-      const filteredCategories = getFilteredCategories();
-      if (filteredCategories.length > 0) {
-        setActiveCategory(filteredCategories[0]);
-      }
-      
-      // Focus sur l'input après animation
-      setTimeout(() => {
-        titleInputRef.current?.focus();
-      }, 300);
+    setTimeout(() => titleInputRef.current?.focus(), 100);
+
+    const initialSuggestions = getFilteredSuggestionsByEventType();
+    setFilteredSuggestions(initialSuggestions);
+    const filteredCategories = getFilteredCategories();
+    if (filteredCategories.length > 0) {
+      setActiveCategory(filteredCategories[0]);
     }
-  }, [visible, initialTitle, animateIn, eventType, getFilteredSuggestionsByEventType, getFilteredCategories]);
-  
+  }, [getFilteredSuggestionsByEventType, getFilteredCategories]);
+
   // Gestion du clavier
   useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener(
-      'keyboardDidShow',
-      () => setKeyboardVisible(true)
-    );
-    const keyboardDidHideListener = Keyboard.addListener(
-      'keyboardDidHide',
-      () => setKeyboardVisible(false)
-    );
-    
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
     return () => {
       keyboardDidShowListener.remove();
       keyboardDidHideListener.remove();
     };
   }, []);
-  
+
   // Suivi des modifications
   useEffect(() => {
     setHasUnsavedChanges(title.trim() !== initialTitle.trim());
   }, [title, initialTitle]);
-  
+
   // Filtrer les suggestions selon la saisie
   useEffect(() => {
-    // D'abord filtrer par type d'événement
     const eventTypeSuggestions = getFilteredSuggestionsByEventType();
-    
     if (!title.trim()) {
-      // Si le champ est vide, montrer les suggestions par défaut (filtrées par type d'événement)
       setFilteredSuggestions(eventTypeSuggestions);
       setSearchMode(false);
       return;
     }
-    
     setSearchMode(true);
-    
-    // Normaliser le texte saisi (retirer accents, minuscules)
     const normalizedInput = title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    
-    // Filtrer toutes les suggestions qui correspondent (déjà filtrées par type d'événement)
-    const filtered = eventTypeSuggestions.filter(suggestion => 
+    const filtered = eventTypeSuggestions.filter(suggestion =>
       suggestion.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(normalizedInput)
     );
-    
     setFilteredSuggestions(filtered);
-    
-    // Si le texte correspond exactement à une suggestion, la sélectionner
-    const exactMatch = filtered.find(s => 
-      s.name.toLowerCase() === title.toLowerCase()
-    );
-    
+    const exactMatch = filtered.find(s => s.name.toLowerCase() === title.toLowerCase());
     if (exactMatch) {
       setSelectedSuggestion(exactMatch.id);
-      
-      // Animation du texte sélectionné
       if (suggestionScaleMap[exactMatch.id]) {
         Animated.sequence([
-          Animated.timing(suggestionScaleMap[exactMatch.id], {
-            toValue: 1.1,
-            duration: 150,
-            useNativeDriver: true
-          }),
-          Animated.spring(suggestionScaleMap[exactMatch.id], {
-            toValue: 1,
-            friction: 4,
-            useNativeDriver: true
-          })
+          Animated.timing(suggestionScaleMap[exactMatch.id], { toValue: 1.1, duration: 150, useNativeDriver: true }),
+          Animated.spring(suggestionScaleMap[exactMatch.id], { toValue: 1, friction: 4, useNativeDriver: true })
         ]).start();
       }
     } else {
       setSelectedSuggestion(null);
     }
   }, [title, suggestionScaleMap, getFilteredSuggestionsByEventType]);
-  
+
   // Animation de notice
   useEffect(() => {
     if (error) {
       Animated.sequence([
-        Animated.timing(noticeAnimation, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true
-        }),
+        Animated.timing(noticeAnimation, { toValue: 1, duration: 300, useNativeDriver: true }),
         Animated.delay(2000),
-        Animated.timing(noticeAnimation, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true
-        })
-      ]).start(() => {
-        if (error === "Le titre doit contenir au moins 3 caractères") {
-          setError(null);
-        }
-      });
+        Animated.timing(noticeAnimation, { toValue: 0, duration: 300, useNativeDriver: true })
+      ]).start();
     }
   }, [error, noticeAnimation]);
-  
+
   // Validation du titre
   const validateTitle = useCallback((value: string): boolean => {
     if (!value.trim()) {
       setError('Veuillez saisir un titre pour votre événement');
       return false;
     }
-    
     if (value.trim().length < 3) {
       setError('Le titre doit contenir au moins 3 caractères');
       return false;
     }
-    
     setError(null);
     return true;
   }, []);
-  
+
   // Gestion du changement de texte
   const handleTextChange = useCallback((value: string) => {
     setTitle(value);
     if (error) validateTitle(value);
   }, [error, validateTitle]);
-  
+
   // Sélection d'une suggestion
   const handleSuggestionSelect = useCallback((suggestion: TitleSuggestion) => {
-    // Animation de sélection
     if (suggestionScaleMap[suggestion.id]) {
       Animated.sequence([
-        Animated.timing(suggestionScaleMap[suggestion.id], {
-          toValue: 0.9,
-          duration: 100,
-          useNativeDriver: true
-        }),
-        Animated.spring(suggestionScaleMap[suggestion.id], {
-          toValue: 1,
-          friction: 4,
-          useNativeDriver: true
-        })
+        Animated.timing(suggestionScaleMap[suggestion.id], { toValue: 0.9, duration: 100, useNativeDriver: true }),
+        Animated.spring(suggestionScaleMap[suggestion.id], { toValue: 1, friction: 4, useNativeDriver: true })
       ]).start();
     }
-    
     setTitle(suggestion.name);
     setSelectedSuggestion(suggestion.id);
     validateTitle(suggestion.name);
-    
-    // Fermer le clavier
     Keyboard.dismiss();
   }, [suggestionScaleMap, validateTitle]);
-  
-  // Continuer avec le titre saisi
+
+  // Continuer vers l'étape suivante
   const handleContinue = useCallback(() => {
     Keyboard.dismiss();
-    
     if (validateTitle(title)) {
-      onContinue(title.trim());
+      const updatedEventData = {
+        ...eventDataFromParams,
+        title: title.trim(),
+      };
+      // Naviguer vers EventDateModal en passant les données mises à jour
+      navigation.navigate('EventDateModal', { eventData: updatedEventData });
     }
-  }, [title, validateTitle, onContinue]);
-  
-  // Fermeture avec animation
-  const handleCloseWithAnimation = useCallback(() => {
-    if (hasUnsavedChanges) {
-      Keyboard.dismiss();
-      setActiveSuggestionPanel(false);
-      
-      // Montrer alerte de confirmation
-      Animated.timing(noticeAnimation, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true
-      }).start();
-      
-      setError('Des modifications non sauvegardées seront perdues');
-      
-      setTimeout(() => {
-        Animated.timing(noticeAnimation, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true
-        }).start(() => {
-          animateOut(onClose);
-        });
-      }, 1500);
-    } else {
-      animateOut(onClose);
-    }
-  }, [hasUnsavedChanges, animateOut, onClose, noticeAnimation]);
-  
-  // Gestion du bouton retour
+  }, [title, validateTitle, eventDataFromParams, navigation]);
+
+  // Fermeture de l'écran (retour à EventsScreen)
+  const handleClose = useCallback(() => {
+    Keyboard.dismiss();
+    navigation.popToTop(); // Revenir au début de la pile (EventsScreen)
+  }, [navigation]);
+
+  // Retour à l'écran précédent
   const handleBack = useCallback(() => {
-    if (hasUnsavedChanges) {
-      Keyboard.dismiss();
-      setActiveSuggestionPanel(false);
-      
-      // Montrer alerte de confirmation
-      Animated.timing(noticeAnimation, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true
-      }).start();
-      
-      setError('Des modifications non sauvegardées seront perdues');
-      
-      setTimeout(() => {
-        Animated.timing(noticeAnimation, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true
-        }).start(() => {
-          onBack();
-        });
-      }, 1500);
-    } else {
-      onBack();
-    }
-  }, [hasUnsavedChanges, onBack, noticeAnimation]);
-  
+    Keyboard.dismiss();
+    // Ici, on revient simplement à l'écran précédent dans la pile de création
+    // (qui pourrait être CreateEventModal ou un autre écran si le flux change)
+    navigation.goBack();
+  }, [navigation]);
+
   // Afficher l'aide
   const showHelp = useCallback(() => {
     Keyboard.dismiss();
     setActiveSuggestionPanel(false);
-    
-    // Animation pour montrer l'aide
-    Animated.timing(noticeAnimation, {
-      toValue: 1,
-      duration: 300,
-      useNativeDriver: true
-    }).start();
-    
+    Animated.timing(noticeAnimation, { toValue: 1, duration: 300, useNativeDriver: true }).start();
     const helpMessage = eventType === 'individuel'
       ? 'Choisissez un titre personnalisé pour cet événement où les invités offrent des cadeaux à l\'hôte'
       : 'Choisissez un titre personnalisé pour cet événement collectif';
-    
     setError(helpMessage);
-    
     setTimeout(() => {
-      Animated.timing(noticeAnimation, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true
-      }).start(() => {
+      Animated.timing(noticeAnimation, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
         setError(null);
         setActiveSuggestionPanel(true);
       });
     }, 2500);
   }, [noticeAnimation, eventType]);
-  
+
   // Obtenir les suggestions pour la catégorie active
   const getSuggestionsForActiveCategory = useCallback(() => {
-    return CREATIVE_SUGGESTIONS[activeCategory]?.filter(suggestion => 
+    return CREATIVE_SUGGESTIONS[activeCategory]?.filter(suggestion =>
       suggestion.eventType === eventType || suggestion.eventType === 'all'
     ) || [];
   }, [activeCategory, eventType]);
-  
+
   // Rendre chaque suggestion
   const renderSuggestion = useCallback(({ item }: { item: TitleSuggestion }) => {
     const isSelected = selectedSuggestion === item.id;
     const scale = suggestionScaleMap[item.id] || new Animated.Value(1);
-    
+
     return (
-      <Animated.View
-        style={{ transform: [{ scale }] }}
-      >
+      <Animated.View style={{ transform: [{ scale }] }}>
         <TouchableOpacity
-          style={[
-            styles.suggestionItem,
-            isSelected && styles.selectedSuggestion
-          ]}
+          style={[ styles.suggestionItem, isSelected && styles.selectedSuggestion ]}
           onPress={() => handleSuggestionSelect(item)}
           activeOpacity={0.7}
         >
           <Text style={styles.suggestionIcon}>{item.icon}</Text>
-          <Text style={[
-            styles.suggestionText,
-            isSelected && styles.selectedSuggestionText
-          ]}>
+          <Text style={[ styles.suggestionText, isSelected && styles.selectedSuggestionText ]}>
             {item.name}
           </Text>
           {isSelected && (
@@ -545,350 +340,235 @@ const EventTitleModal: React.FC<EventTitleModalProps> = ({
       </Animated.View>
     );
   }, [selectedSuggestion, suggestionScaleMap, handleSuggestionSelect]);
-  
+
   // Changer de catégorie
   const handleCategoryChange = useCallback((category: string) => {
     setActiveCategory(category);
-    
-    // Faire défiler vers la catégorie
     const filteredCategories = getFilteredCategories();
     setTimeout(() => {
-      categoryScrollRef.current?.scrollTo({ 
-        x: filteredCategories.indexOf(category) * 100, 
-        animated: true 
+      categoryScrollRef.current?.scrollTo({
+        x: filteredCategories.indexOf(category) * 100, // Ajuster la valeur si nécessaire
+        animated: true
       });
     }, 100);
   }, [getFilteredCategories]);
-  
-  // Ne rien rendre si modal pas visible
-  if (!visible) return null;
-  
+
   // Obtenir les catégories filtrées
   const filteredCategories = getFilteredCategories();
   const suggestionsForActiveCategory = getSuggestionsForActiveCategory();
-  
+
   return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="none"
-      statusBarTranslucent
-      onRequestClose={handleCloseWithAnimation}
-    >
-      <StatusBar barStyle="dark-content" backgroundColor="rgba(0, 0, 0, 0.5)" />
-      
-      <View style={styles.container}>
-        {/* Overlay avec effet de flou */}
-        <Animated.View 
-          style={[styles.overlay, { opacity }]} 
-          onTouchEnd={handleCloseWithAnimation}
-        >
-          <BlurView intensity={20} style={StyleSheet.absoluteFill} />
-        </Animated.View>
-        
-        {/* Modal avec animation */}
-        <Animated.View 
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.keyboardView}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={handleClose} // Utiliser handleClose (popToTop)
+            style={styles.closeButton}
+            accessibilityLabel="Fermer"
+          >
+            <Ionicons name="close" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.title}>Titre de l'événement</Text>
+          <TouchableOpacity
+            style={styles.helpButton}
+            onPress={showHelp}
+            accessibilityLabel="Aide"
+          >
+            <Ionicons name="help-circle-outline" size={24} color="#333" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Animation d'alerte/notification */}
+        <Animated.View
           style={[
-            styles.modalContainer,
-            { transform: [{ translateY }] }
+            styles.noticeContainer,
+            {
+              opacity: noticeAnimation,
+              transform: [{ translateY: noticeAnimation.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }]
+            }
           ]}
         >
-          {/* Zone de drag */}
-          <View 
-            {...panResponder.panHandlers}
-            style={styles.dragHandleContainer}
-          >
-            <View style={styles.dragHandle} />
+          <View style={styles.noticeContent}>
+            <Ionicons
+              name={error ? "alert-circle" : "information-circle"}
+              size={20}
+              color={error ? "#FF3B30" : "#007AFF"}
+            />
+            <Text style={[ styles.noticeText, error ? styles.errorText : styles.infoText ]}>
+              {error || `Donnez un titre original à votre événement ${eventType === 'individuel' ? 'individuel' : 'collectif'}`}
+            </Text>
           </View>
-          
-          <SafeAreaView style={styles.safeArea}>
-            <KeyboardAvoidingView 
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-              style={styles.keyboardView}
-              keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
-            >
-              {/* Header */}
-              <View style={styles.header}>
-                <TouchableOpacity 
-                  onPress={handleCloseWithAnimation} 
-                  style={styles.closeButton}
-                  accessibilityLabel="Fermer"
-                >
-                  <Ionicons name="close" size={24} color="#333" />
-                </TouchableOpacity>
-                
-                <Text style={styles.title}>Titre de l'événement</Text>
-                
-                <TouchableOpacity 
-                  style={styles.helpButton}
-                  onPress={showHelp}
-                  accessibilityLabel="Aide"
-                >
-                  <Ionicons name="help-circle-outline" size={24} color="#333" />
-                </TouchableOpacity>
-              </View>
-              
-              {/* Animation d'alerte/notification */}
-              <Animated.View 
-                style={[
-                  styles.noticeContainer,
-                  {
-                    opacity: noticeAnimation,
-                    transform: [
-                      { 
-                        translateY: noticeAnimation.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [-20, 0]
-                        })
-                      }
-                    ]
-                  }
-                ]}
-              >
-                <View style={styles.noticeContent}>
-                  <Ionicons 
-                    name={error ? "alert-circle" : "information-circle"} 
-                    size={20} 
-                    color={error ? "#FF3B30" : "#007AFF"} 
-                  />
-                  <Text style={[
-                    styles.noticeText,
-                    error ? styles.errorText : styles.infoText
-                  ]}>
-                    {error || `Donnez un titre original à votre événement ${eventType === 'individuel' ? 'individuel' : 'collectif'}`}
-                  </Text>
-                </View>
-              </Animated.View>
-              
-              {/* Champ de saisie */}
-              <View style={styles.inputSection}>
-                <View style={[
-                  styles.inputContainer,
-                  error ? styles.inputError : (title.length > 0 ? styles.inputSuccess : null)
-                ]}>
-                  <View style={styles.iconContainer}>
-                    <Ionicons name="create-outline" size={20} color="#999" />
-                  </View>
-                  
-                  <TextInput
-                    ref={titleInputRef}
-                    style={styles.input}
-                    placeholder={`Par exemple : ${randomPlaceholder}...`}
-                    placeholderTextColor="#999"
-                    value={title}
-                    onChangeText={handleTextChange}
-                    maxLength={maxLength}
-                    returnKeyType="done"
-                    onSubmitEditing={handleContinue}
-                    selectionColor="#007AFF"
-                    autoCapitalize="sentences"
-                    accessibilityLabel="Champ de saisie du titre"
-                  />
-                  
-                  {title.length > 0 && (
-                    <TouchableOpacity 
-                      style={styles.clearButton}
-                      onPress={() => setTitle('')}
-                      accessibilityLabel="Effacer"
-                    >
-                      <Ionicons name="close-circle" size={20} color="#999" />
-                    </TouchableOpacity>
-                  )}
-                </View>
-                
-                {/* Compteur de caractères */}
-                <View style={styles.counterContainer}>
-                  <Text style={[
-                    styles.counter,
-                    title.length >= maxLength * 0.9 ? (
-                      title.length >= maxLength ? styles.counterDanger : styles.counterWarning
-                    ) : null
-                  ]}>
-                    {title.length}/{maxLength}
-                  </Text>
-                </View>
-              </View>
-              
-              {/* Section d'inspiration */}
-              <View style={styles.inspirationContainer}>
-                <Text style={styles.inspirationTitle}>
-                  Besoin d'inspiration ?
-                </Text>
-                <Text style={styles.inspirationText}>
-                  {eventType === 'individuel'
-                    ? 'Idées pour événements où les invités offrent des cadeaux à l\'hôte'
-                    : 'Idées pour événements collectifs avec cadeaux'}
-                </Text>
-              </View>
-              
-              {/* Section des suggestions */}
-              {activeSuggestionPanel && (
-                <View style={styles.suggestionsSection}>
-                  {!searchMode ? (
-                    <>
-                      {/* Navigation par catégories */}
-                      <View style={styles.categoriesContainer}>
-                        <ScrollView
-                          ref={categoryScrollRef}
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          contentContainerStyle={styles.categoriesContent}
-                        >
-                          {filteredCategories.map((category) => (
-                            <TouchableOpacity
-                              key={category}
-                              style={[
-                                styles.categoryButton,
-                                activeCategory === category && styles.activeCategoryButton
-                              ]}
-                              onPress={() => handleCategoryChange(category)}
-                            >
-                              <Text style={[
-                                styles.categoryText,
-                                activeCategory === category && styles.activeCategoryText
-                              ]}>
-                                {category}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      </View>
-                      
-                      {/* Affichage de la catégorie active */}
-                      <Text style={styles.sectionTitle}>{activeCategory}</Text>
-                      
-                      <FlatList
-                        data={suggestionsForActiveCategory}
-                        renderItem={renderSuggestion}
-                        keyExtractor={(item) => item.id}
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.suggestionsContainer}
-                        ListEmptyComponent={
-                          <View style={styles.noResultsContainer}>
-                            <Text style={styles.noResultsText}>
-                              Aucune suggestion disponible dans cette catégorie
-                            </Text>
-                          </View>
-                        }
-                      />
-                    </>
-                  ) : (
-                    <>
-                      {/* Mode recherche */}
-                      <Text style={styles.sectionTitle}>
-                        {filteredSuggestions.length > 0 
-                          ? "Suggestions correspondantes" 
-                          : "Aucune suggestion correspondante"}
-                      </Text>
-                      
-                      {filteredSuggestions.length > 0 ? (
-                        <FlatList
-                          data={filteredSuggestions}
-                          renderItem={renderSuggestion}
-                          keyExtractor={(item) => `search-${item.id}`}
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          contentContainerStyle={styles.suggestionsContainer}
-                        />
-                      ) : (
-                        <View style={styles.noResultsContainer}>
-                          <Text style={styles.noResultsText}>
-                            Continuez à saisir votre titre personnalisé
-                          </Text>
-                          <Text style={styles.noResultsSubtext}>
-                            Soyez créatif ! Votre événement est unique.
-                          </Text>
-                        </View>
-                      )}
-                    </>
-                  )}
-                </View>
-              )}
-              
-              {/* Boutons de navigation */}
-              <View style={[
-                styles.buttonsContainer,
-                keyboardVisible && styles.keyboardOpenButtons
-              ]}>
-                <TouchableOpacity 
-                  style={styles.backButton}
-                  onPress={handleBack}
-                  accessibilityLabel="Retour"
-                >
-                  <Ionicons name="arrow-back" size={20} color="#666" />
-                  <Text style={styles.backButtonText}>Retour</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity 
-                  style={[
-                    styles.nextButton, 
-                    (!title.trim() || isLoading || !!error) ? styles.disabledButton : styles.activeButton
-                  ]}
-                  onPress={handleContinue}
-                  disabled={!title.trim() || isLoading || !!error}
-                  accessibilityLabel="Suivant"
-                >
-                  {isLoading ? (
-                    <View style={styles.loadingContainer}>
-                      <View style={styles.loadingIndicator} />
-                    </View>
-                  ) : (
-                    <>
-                      <Text style={styles.nextButtonText}>Suivant</Text>
-                      <Ionicons name="arrow-forward" size={20} color="white" />
-                    </>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </KeyboardAvoidingView>
-          </SafeAreaView>
         </Animated.View>
-      </View>
-    </Modal>
+
+        {/* Champ de saisie */}
+        <View style={styles.inputSection}>
+          <View style={[
+            styles.inputContainer,
+            error ? styles.inputError : (title.length > 0 ? styles.inputSuccess : null)
+          ]}>
+            <View style={styles.iconContainer}>
+              <Ionicons name="create-outline" size={20} color="#999" />
+            </View>
+            <TextInput
+              ref={titleInputRef}
+              style={styles.input}
+              placeholder={`Par exemple : ${randomPlaceholder}...`}
+              placeholderTextColor="#999"
+              value={title}
+              onChangeText={handleTextChange}
+              maxLength={maxLength}
+              returnKeyType="done"
+              onSubmitEditing={handleContinue}
+              selectionColor="#007AFF"
+              autoCapitalize="sentences"
+              accessibilityLabel="Champ de saisie du titre"
+            />
+            {title.length > 0 && (
+              <TouchableOpacity
+                style={styles.clearButton}
+                onPress={() => setTitle('')}
+                accessibilityLabel="Effacer"
+              >
+                <Ionicons name="close-circle" size={20} color="#999" />
+              </TouchableOpacity>
+            )}
+          </View>
+          <View style={styles.counterContainer}>
+            <Text style={[
+              styles.counter,
+              title.length >= maxLength * 0.9 ? (title.length >= maxLength ? styles.counterDanger : styles.counterWarning) : null
+            ]}>
+              {title.length}/{maxLength}
+            </Text>
+          </View>
+        </View>
+
+        {/* Section d'inspiration */}
+        <View style={styles.inspirationContainer}>
+          <Text style={styles.inspirationTitle}>Besoin d'inspiration ?</Text>
+          <Text style={styles.inspirationText}>
+            {eventType === 'individuel'
+              ? 'Idées pour événements où les invités offrent des cadeaux à l\'hôte'
+              : 'Idées pour événements collectifs avec cadeaux'}
+          </Text>
+        </View>
+
+        {/* Section des suggestions */}
+        {activeSuggestionPanel && (
+          <View style={styles.suggestionsSection}>
+            {!searchMode ? (
+              <>
+                {/* Navigation par catégories */}
+                <View style={styles.categoriesContainer}>
+                  <ScrollView
+                    ref={categoryScrollRef}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.categoriesContent}
+                  >
+                    {filteredCategories.map((category) => (
+                      <TouchableOpacity
+                        key={category}
+                        style={[ styles.categoryButton, activeCategory === category && styles.activeCategoryButton ]}
+                        onPress={() => handleCategoryChange(category)}
+                      >
+                        <Text style={[ styles.categoryText, activeCategory === category && styles.activeCategoryText ]}>
+                          {category}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+                {/* Affichage de la catégorie active */}
+                <Text style={styles.sectionTitle}>{activeCategory}</Text>
+                <FlatList
+                  data={suggestionsForActiveCategory}
+                  renderItem={renderSuggestion}
+                  keyExtractor={(item) => item.id}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.suggestionsContainer}
+                  ListEmptyComponent={
+                    <View style={styles.noResultsContainer}>
+                      <Text style={styles.noResultsText}>Aucune suggestion disponible</Text>
+                    </View>
+                  }
+                />
+              </>
+            ) : (
+              <>
+                {/* Mode recherche */}
+                <Text style={styles.sectionTitle}>
+                  {filteredSuggestions.length > 0 ? "Suggestions correspondantes" : "Aucune suggestion correspondante"}
+                </Text>
+                {filteredSuggestions.length > 0 ? (
+                  <FlatList
+                    data={filteredSuggestions}
+                    renderItem={renderSuggestion}
+                    keyExtractor={(item) => `search-${item.id}`}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.suggestionsContainer}
+                  />
+                ) : (
+                  <View style={styles.noResultsContainer}>
+                    <Text style={styles.noResultsText}>Continuez à saisir votre titre personnalisé</Text>
+                    <Text style={styles.noResultsSubtext}>Soyez créatif ! Votre événement est unique.</Text>
+                  </View>
+                )}
+              </>
+            )}
+          </View>
+        )}
+
+        {/* Boutons de navigation */}
+        <View style={[ styles.buttonsContainer, keyboardVisible && styles.keyboardOpenButtons ]}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={handleBack}
+            accessibilityLabel="Retour"
+          >
+            <Ionicons name="arrow-back" size={20} color="#666" />
+            <Text style={styles.backButtonText}>Retour</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[ styles.nextButton, (!title.trim() || isLoading || !!error) ? styles.disabledButton : styles.activeButton ]}
+            onPress={handleContinue}
+            disabled={!title.trim() || isLoading || !!error}
+            accessibilityLabel="Suivant"
+          >
+            {isLoading ? (
+              <View style={styles.loadingContainer}>
+                <View style={styles.loadingIndicator} />
+              </View>
+            ) : (
+              <>
+                <Text style={styles.nextButtonText}>Suivant</Text>
+                <Ionicons name="arrow-forward" size={20} color="white" />
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  modalContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'white',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 25,
-    height: Platform.OS === 'ios' ? '95%' : '100%'
-  },
   safeArea: {
+    flex: 1,
+    backgroundColor: 'white',
+  },
+  container: {
     flex: 1,
   },
   keyboardView: {
     flex: 1,
-  },
-  dragHandleContainer: {
-    width: '100%',
-    height: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  dragHandle: {
-    width: 40,
-    height: 5,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 3,
   },
   header: {
     flexDirection: 'row',

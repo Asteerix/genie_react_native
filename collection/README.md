@@ -18,7 +18,7 @@ Cette collection Postman permet de tester facilement toutes les routes d'API li�
 
 ## Configuration
 
-Par défaut, l'API est configurée pour utiliser `http://localhost:8080` comme URL de base. Vous pouvez modifier cette valeur dans les variables d'environnement si nécessaire.
+Par défaut, l'API est configurée pour utiliser `https://https://6de4-92-184-145-214.ngrok-free.app` comme URL de base. Vous pouvez modifier cette valeur dans les variables d'environnement si nécessaire.
 
 ## Fonctionnalités automatisées
 

@@ -50,30 +50,8 @@ const SPRING_CONFIG = {
   useNativeDriver: true,
 };
 
-// Mock data - ideally would be fetched from an API
-const MOCK_USERS: User[] = [
-  {
-    id: '1',
-    name: 'Paul Marceau',
-    username: 'paulmarceau',
-    avatar: 'https://api.a0.dev/assets/image?text=man%20beard%20hat%20portrait%20cartoon%20orange%20background&aspect=1:1&seed=13',
-    isAdmin: true
-  },
-  {
-    id: '2',
-    name: 'Johanna Toulet',
-    username: 'johannatoulet',
-    avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait%20green%20background&aspect=1:1&seed=11',
-    isAdmin: false
-  },
-  {
-    id: '3',
-    name: 'Audriana Toulet',
-    username: 'adrianatoulet',
-    avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait%20pink%20background&aspect=1:1&seed=12',
-    isAdmin: false
-  }
-];
+// Import user/friends data from the API
+import { getUserFriends } from '../api/contacts';
 
   // Memoized User Item Component
 const UserItem = memo(({ user, onToggle }: { user: User, onToggle: (id: string) => void }) => {
@@ -156,21 +134,38 @@ const AddAdminModal: React.FC<AddAdminModalProps> = ({
   const translateY = useRef(new Animated.Value(MODAL_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   
-  // Initialize users with mock data and existing admins status
+  // Initialize users with real data from API and existing admins status
   useEffect(() => {
     if (visible) {
       setIsLoading(true);
       
-      // Simulate API fetch delay
-      setTimeout(() => {
-        const initialUsers = MOCK_USERS.map(user => {
-          // Check if user is already an admin
-          const isAdmin = currentAdmins.some(admin => admin.id === user.id);
-          return { ...user, isAdmin };
-        });
-        setUsers(initialUsers);
-        setIsLoading(false);
-      }, 300);
+      // Fetch real friends data from the API
+      const fetchFriends = async () => {
+        try {
+          const result = await getUserFriends();
+          if (result.data) {
+            const friendsList = result.data.map(friend => ({
+              id: friend.id,
+              name: friend.name,
+              username: friend.username || '',
+              avatar: friend.avatar,
+              // Check if friend is already an admin
+              isAdmin: currentAdmins.some(admin => admin.id === friend.id)
+            }));
+            setUsers(friendsList);
+          } else {
+            // If no friends data, set empty array
+            setUsers([]);
+          }
+        } catch (error) {
+          console.error('Error fetching friends:', error);
+          setUsers([]);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      
+      fetchFriends();
       
       // Animate modal in
       Animated.parallel([

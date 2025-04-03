@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import BottomTabBar from '../components/BottomTabBar';
+import { useMessaging } from '../context/MessagingContext';
 
 // Types for messages
 interface DirectMessage {
@@ -47,125 +48,119 @@ const MessagesScreen = () => {
   const [activeTab, setActiveTab] = useState<'friends' | 'events'>('friends');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Mock data for direct messages
-  const directMessages: DirectMessage[] = [
-    {
-      id: '1',
-      name: 'Audriana Toulet, Paul Ma...',
-      participants: [
-        {
-          name: 'Audriana Toulet',
-          avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait&aspect=1:1&seed=101'
-        },
-        {
-          name: 'Paul Marceau',
-          avatar: 'https://api.a0.dev/assets/image?text=man%20beard%20hat%20portrait&aspect=1:1&seed=103'
-        }
-      ],
-      lastMessage: "D'accord ! Attends !",
-      timestamp: '2025-03-23T10:00:00',
-      formattedTime: '1h',
-      hasUnread: true,
-      isGroupChat: true
-    },
-    {
-      id: '2',
-      name: 'Audriana Toulet',
-      participants: [
-        {
-          name: 'Audriana Toulet',
-          avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait&aspect=1:1&seed=101'
-        }
-      ],
-      lastMessage: "D'accord ! Attends !",
-      timestamp: '2025-03-23T10:30:00',
-      formattedTime: '1h',
-      hasUnread: true,
-      isGroupChat: false
-    },
-    {
-      id: '3',
-      name: 'Paul Marceau',
-      participants: [
-        {
-          name: 'Paul Marceau',
-          avatar: 'https://api.a0.dev/assets/image?text=man%20beard%20hat%20portrait&aspect=1:1&seed=103'
-        }
-      ],
-      lastMessage: "Are you sure she is gonna like that gift ??",
-      timestamp: '2025-03-21T14:00:00',
-      formattedTime: '3j',
-      hasUnread: false,
-      isGroupChat: false
-    },
-    {
-      id: '4',
-      name: 'Johanna Toulet',
-      participants: [
-        {
-          name: 'Johanna Toulet',
-          avatar: 'https://api.a0.dev/assets/image?text=young%20woman%20cartoon%20portrait&aspect=1:1&seed=102'
-        }
-      ],
-      lastMessage: "Tu me diras :)",
-      timestamp: '2025-02-23T10:00:00',
-      formattedTime: '1mo',
-      hasUnread: false,
-      isGroupChat: false
-    }
-  ];
+  // Will be populated from API
+  const [directMessages, setDirectMessages] = useState<DirectMessage[]>([]);
 
-  // Mock data for event messages
-  const eventMessages: EventMessage[] = [
-    {
-      id: '1',
-      title: 'Noël',
-      subtitle: 'Noël 2024',
-      icon: '🎄',
-      iconBackgroundColor: '#FFCDD2',
-      timestamp: '2025-03-23T09:00:00',
-      formattedTime: '15h'
-    },
-    {
-      id: '2',
-      title: 'Anniversaire',
-      subtitle: 'Paul Marceau',
-      icon: '🎂',
-      iconBackgroundColor: '#E1BEE7',
-      timestamp: '2025-03-22T14:00:00',
-      formattedTime: '2j'
-    },
-    {
-      id: '3',
-      title: 'Mariage',
-      subtitle: 'Dan & Audriana',
-      icon: '💍',
-      iconBackgroundColor: '#B3E5FC',
-      timestamp: '2025-03-19T10:00:00',
-      formattedTime: '5m'
-    },
-    {
-      id: '4',
-      title: 'Anniversaire',
-      subtitle: 'Dan Toulet',
-      icon: '🎂',
-      iconBackgroundColor: '#E6EE9C',
-      timestamp: '2025-02-08T14:00:00',
-      formattedTime: '44j',
-      isPast: true
-    },
-    {
-      id: '5',
-      title: 'Noël',
-      subtitle: 'Noël 2023',
-      icon: '🎅',
-      iconBackgroundColor: '#C8E6C9',
-      timestamp: '2024-03-24T14:00:00',
-      formattedTime: '+1an',
-      isPast: true
-    }
-  ];
+  // Will be populated from API
+  const [eventMessages, setEventMessages] = useState<EventMessage[]>([]);
 
+  const { loadChats, chats, connectWebSocket, isWebSocketConnected } = useMessaging();
+  
+  // Load chats from API and connect to WebSocket on mount
+  useEffect(() => {
+    const initializeMessaging = async () => {
+      console.log('Initializing messaging system...');
+      
+      // Load chats from API
+      await loadChats();
+      
+      // Connect to WebSocket if not already connected
+      if (!isWebSocketConnected()) {
+        console.log('Connecting to WebSocket from MessagesScreen');
+        const connected = await connectWebSocket();
+        console.log('WebSocket connection result:', connected ? 'connected' : 'failed');
+      } else {
+        console.log('WebSocket already connected');
+      }
+    };
+    
+    initializeMessaging();
+    
+    // Cleanup when component unmounts
+    return () => {
+      // Don't disconnect WebSocket when leaving the messages screen
+      // as it should stay connected in the background
+      console.log('MessagesScreen unmounted, WebSocket connection maintained');
+    };
+  }, []);
+  
+  // Format chats for display
+  useEffect(() => {
+    if (chats.length > 0) {
+      // Format direct and group chats
+      const formattedDirectChats = chats
+        .filter(chat => chat.type === 'direct' || chat.type === 'group')
+        .map(chat => {
+          // Format the chat for display
+          const isGroup = chat.type === 'group';
+          const chatName = chat.name || 'Chat';
+          
+          // Extract participants' avatars
+          const participantAvatars = chat.participants.map(p => {
+            // This should be enhanced with a user service to get actual avatars
+            return `https://api.a0.dev/assets/image?text=user%20avatar&aspect=1:1&seed=${p}`;
+          });
+          
+          return {
+            id: chat.id,
+            name: chatName,
+            participants: participantAvatars.map((avatar, index) => ({
+              name: `Participant ${index + 1}`,
+              avatar
+            })),
+            lastMessage: chat.lastMessage?.content || 'No messages yet',
+            timestamp: chat.lastMessage?.createdAt || chat.createdAt,
+            formattedTime: formatTimestamp(chat.lastMessage?.createdAt || chat.createdAt),
+            hasUnread: false, // This should be calculated based on read status
+            isGroupChat: isGroup
+          };
+        });
+      
+      setDirectMessages(formattedDirectChats);
+      
+      // Format event chats
+      const formattedEventChats = chats
+        .filter(chat => chat.type === 'event')
+        .map(chat => {
+          return {
+            id: chat.id,
+            title: chat.name || 'Event',
+            subtitle: `Event ID: ${chat.eventId}`,
+            icon: '🎉', // This should come from event data
+            iconBackgroundColor: getRandomColor(),
+            timestamp: chat.lastMessage?.createdAt || chat.createdAt,
+            formattedTime: formatTimestamp(chat.lastMessage?.createdAt || chat.createdAt)
+          };
+        });
+      
+      setEventMessages(formattedEventChats);
+    }
+  }, [chats]);
+  
+  // Helper function to format timestamps
+  const formatTimestamp = (timestamp: string) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffSec = Math.round(diffMs / 1000);
+    const diffMin = Math.round(diffSec / 60);
+    const diffHour = Math.round(diffMin / 60);
+    const diffDay = Math.round(diffHour / 24);
+    
+    if (diffSec < 60) return 'à l\'instant';
+    if (diffMin < 60) return `${diffMin}m`;
+    if (diffHour < 24) return `${diffHour}h`;
+    if (diffDay < 30) return `${diffDay}j`;
+    if (diffDay < 365) return `${Math.round(diffDay/30)}mo`;
+    return `${Math.round(diffDay/365)}an`;
+  };
+  
+  // Helper function to generate a random color
+  const getRandomColor = () => {
+    const colors = ['#FFCDD2', '#E1BEE7', '#B3E5FC', '#E6EE9C', '#C8E6C9', '#FFE0B2'];
+    return colors[Math.floor(Math.random() * colors.length)];
+  };
+  
   const navigateToChat = (messageId: string, name: string, avatars: string[], isGroupChat: boolean) => {
     navigation.navigate('ChatDetail', {
       messageId,
@@ -178,14 +173,14 @@ const MessagesScreen = () => {
   const navigateToEventChat = (event: EventMessage) => {
     navigation.navigate('EventChat', {
       eventId: event.id,
-      eventTitle: event.title === 'Noël' ? `${event.title} ${event.subtitle.split(' ')[1]}` : event.title,
+      eventTitle: event.title,
       eventIcon: event.icon,
       eventColor: event.iconBackgroundColor
     });
   };
 
   const navigateToNewMessage = () => {
-    navigation.navigate('NewMessage');
+    navigation.navigate('NewMessage', {});
   };
 
   const handleBack = () => {

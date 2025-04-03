@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/asteerix/auth-backend/internal/config"
+	"genie/internal/config"
 	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -15,10 +15,49 @@ import (
 
 // Database encapsule les collections MongoDB
 type Database struct {
-	client         *mongo.Client
-	db             *mongo.Database
-	Users          *mongo.Collection
+	Client          *mongo.Client
+	DB              *mongo.Database
+	Users           *mongo.Collection
 	ManagedAccounts *mongo.Collection
+	Chats           *mongo.Collection
+	Messages        *mongo.Collection
+	Transactions    *mongo.Collection
+}
+
+// NewDatabase creates a new database connection
+func NewDatabase(uri, dbName string) (*Database, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Préparer les options de connexion
+	clientOptions := options.Client().ApplyURI(uri)
+	
+	// Se connecter à MongoDB
+	client, err := mongo.Connect(ctx, clientOptions)
+	if err != nil {
+		return nil, fmt.Errorf("erreur lors de la connexion à MongoDB: %w", err)
+	}
+
+	// Vérifier la connexion
+	if err = client.Ping(ctx, readpref.Primary()); err != nil {
+		return nil, fmt.Errorf("erreur lors de la vérification de la connexion MongoDB: %w", err)
+	}
+
+	log.Info().Msg("Connexion à MongoDB établie avec succès")
+
+	// Initialiser la base de données et les collections
+	db := client.Database(dbName)
+	database := &Database{
+		Client:          client,
+		DB:              db,
+		Users:           db.Collection("users"),
+		ManagedAccounts: db.Collection("managed_accounts"),
+		Chats:           db.Collection("chats"),
+		Messages:        db.Collection("messages"),
+		Transactions:    db.Collection("transactions"),
+	}
+
+	return database, nil
 }
 
 // Connect se connecte à MongoDB et initialise les collections
@@ -53,10 +92,13 @@ func Connect(cfg config.MongoDBConfig) (*Database, error) {
 	// Initialiser la base de données et les collections
 	db := client.Database(cfg.Database)
 	database := &Database{
-		client:         client,
-		db:             db,
-		Users:          db.Collection("users"),
+		Client:          client,
+		DB:              db,
+		Users:           db.Collection("users"),
 		ManagedAccounts: db.Collection("managed_accounts"),
+		Chats:           db.Collection("chats"),
+		Messages:        db.Collection("messages"),
+		Transactions:    db.Collection("transactions"),
 	}
 
 	return database, nil
@@ -64,11 +106,18 @@ func Connect(cfg config.MongoDBConfig) (*Database, error) {
 
 // Disconnect ferme la connexion MongoDB
 func (d *Database) Disconnect(ctx context.Context) error {
-	if err := d.client.Disconnect(ctx); err != nil {
+	if err := d.Client.Disconnect(ctx); err != nil {
 		return fmt.Errorf("erreur lors de la déconnexion de MongoDB: %w", err)
 	}
 	log.Info().Msg("Déconnexion de MongoDB réussie")
 	return nil
+}
+
+// Close closes the database connection
+func (d *Database) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return d.Disconnect(ctx)
 }
 
 // CreateIndexes crée les index nécessaires pour les performances et les contraintes d'unicité
@@ -111,6 +160,84 @@ func (d *Database) CreateIndexes(ctx context.Context) error {
 	_, err = d.ManagedAccounts.Indexes().CreateMany(ctx, managedAccountsIndexes)
 	if err != nil {
 		return fmt.Errorf("erreur lors de la création des index de comptes gérés: %w", err)
+	}
+
+	// Index pour les chats
+	chatsIndexes := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{Key: "participants", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
+			Keys:    bson.D{{Key: "type", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
+			Keys:    bson.D{{Key: "eventId", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+	}
+
+	// Créer les index pour les chats
+	_, err = d.Chats.Indexes().CreateMany(ctx, chatsIndexes)
+	if err != nil {
+		return fmt.Errorf("erreur lors de la création des index de chats: %w", err)
+	}
+
+	// Index pour les messages
+	messagesIndexes := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{Key: "chatId", Value: 1}},
+			Options: options.Index(),
+		},
+		{
+			Keys:    bson.D{{Key: "senderId", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
+			Keys:    bson.D{{Key: "createdAt", Value: 1}},
+			Options: options.Index(),
+		},
+		{
+			Keys:    bson.D{{Key: "chatId", Value: 1}, {Key: "createdAt", Value: -1}},
+			Options: options.Index(),
+		},
+	}
+
+	// Créer les index pour les messages
+	_, err = d.Messages.Indexes().CreateMany(ctx, messagesIndexes)
+	if err != nil {
+		return fmt.Errorf("erreur lors de la création des index de messages: %w", err)
+	}
+
+	// Index pour les transactions
+	transactionsIndexes := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{Key: "userId", Value: 1}},
+			Options: options.Index(),
+		},
+		{
+			Keys:    bson.D{{Key: "createdAt", Value: -1}},
+			Options: options.Index(),
+		},
+		{
+			Keys:    bson.D{{Key: "userId", Value: 1}, {Key: "createdAt", Value: -1}},
+			Options: options.Index(),
+		},
+		{
+			Keys:    bson.D{{Key: "recipientId", Value: 1}},
+			Options: options.Index().SetSparse(true),
+		},
+		{
+			Keys:    bson.D{{Key: "type", Value: 1}},
+			Options: options.Index(),
+		},
+	}
+
+	// Créer les index pour les transactions
+	_, err = d.Transactions.Indexes().CreateMany(ctx, transactionsIndexes)
+	if err != nil {
+		return fmt.Errorf("erreur lors de la création des index de transactions: %w", err)
 	}
 
 	log.Info().Msg("Index MongoDB créés avec succès")

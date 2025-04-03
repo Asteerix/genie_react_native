@@ -3,9 +3,9 @@ package api
 import (
 	"net/http"
 
-	"github.com/asteerix/auth-backend/internal/accounts"
-	"github.com/asteerix/auth-backend/internal/middleware"
-	"github.com/asteerix/auth-backend/internal/models"
+	"genie/internal/accounts"
+	"genie/internal/middleware"
+	"genie/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 )

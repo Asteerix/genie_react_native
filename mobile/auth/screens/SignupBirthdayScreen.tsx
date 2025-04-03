@@ -100,8 +100,8 @@ const SignupBirthdayScreen = () => {
   };
 
   const handleContinue = async () => {
-    if (age < 13) {
-      setError('Vous êtes trop jeune pour utiliser l\'application');
+    if (age < 14) {
+      setError('Vous devez avoir au moins 14 ans pour créer un compte.');
       setShowError(true);
       return;
     }

@@ -9,7 +9,8 @@ import {
   StatusBar,
   Animated,
   Easing,
-  Alert
+  Alert,
+  Linking // Ajouter Linking pour les URLs
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -19,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import * as authApi from '../../api/auth'; // Ajouter l'importation statique
 
 type SignupProfileScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'SignupProfile'>;
 
@@ -27,20 +29,29 @@ const SignupProfileScreen = () => {
   const progressAnim = useRef(new Animated.Value(0)).current;
   const avatarAnim = useRef(new Animated.Value(0)).current;
   const optionsAnim = useRef(new Animated.Value(0)).current;
+  const legalAnim = useRef(new Animated.Value(0)).current; // Ajouter pour la section légale
   const buttonAnim = useRef(new Animated.Value(0)).current;
   const buttonOpacity = useRef(new Animated.Value(0)).current;
-  
+
   // États
   const [avatar, setAvatar] = useState<string | null>(null);
-  
+  const [isSubmitting, setIsSubmitting] = useState(false); // Ajouter pour le statut de soumission
+
   // Hooks de navigation et d'authentification
   const { signUp, isLoading } = useAuth();
   const navigation = useNavigation<SignupProfileScreenNavigationProp>();
   const route = useRoute<any>();
-  const { emailOrPhone, password, firstName, lastName, gender, birthdate } = route.params;
+  const { emailOrPhone, password, firstName, lastName, gender, birthDate, avatarUrl: routeAvatarUrl } = route.params; // Correction: birthdate -> birthDate, ajout avatarUrl
   
   // Récupérer la première lettre du prénom pour l'avatar par défaut
-  const firstLetter = firstName.charAt(0).toUpperCase();
+  const firstLetter = firstName ? firstName.charAt(0).toUpperCase() : '?'; // Gérer si firstName est vide
+
+  // Utiliser l'avatar de la route si disponible (retour depuis AvatarCreation)
+  useEffect(() => {
+    if (routeAvatarUrl) {
+      setAvatar(routeAvatarUrl);
+    }
+  }, [routeAvatarUrl]);
 
   // Animation des éléments à l'entrée
   useEffect(() => {
@@ -65,7 +76,12 @@ const SignupProfileScreen = () => {
         duration: 500,
         useNativeDriver: true
       }),
-      Animated.parallel([
+      Animated.timing(legalAnim, { // Animation section légale
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true
+      }),
+      Animated.parallel([ // Animation bouton
         Animated.timing(buttonAnim, {
           toValue: 1,
           duration: 500,
@@ -81,22 +97,6 @@ const SignupProfileScreen = () => {
     ]).start();
   }, []);
 
-  // Demande des permissions d'accès à la caméra et à la galerie
-  useEffect(() => {
-    (async () => {
-      const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
-      const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (cameraStatus !== 'granted' || libraryStatus !== 'granted') {
-        Alert.alert(
-          "Permissions requises",
-          "Nous avons besoin d'accéder à votre caméra et à votre galerie pour cette fonctionnalité.",
-          [{ text: "OK" }]
-        );
-      }
-    })();
-  }, []);
-
   // Fonctions de navigation
   const handleCreateAvatar = () => {
     // Naviguer vers l'écran de création d'avatar
@@ -106,24 +106,73 @@ const SignupProfileScreen = () => {
       firstName,
       lastName,
       gender,
-      birthdate,
-      returnScreen: 'SignupProfile'
+      birthDate // Correction: birthdate -> birthDate
+      // returnScreen: 'SignupProfile' // Supprimé car non défini dans le type de navigation
     });
   };
   
-  const handleComplete = () => {
-    // Naviguer vers l'écran de confirmation du profil
-    navigation.navigate('SignupProfileConfirm', {
-      emailOrPhone,
-      password,
-      firstName,
-      lastName,
-      gender,
-      birthdate,
-      avatar: avatar || `https://api.a0.dev/assets/image?text=avatar%20letter%20${firstName.charAt(0)}&aspect=1:1`
-    });
+  // Remplacer par la logique d'inscription finale
+  const handleComplete = async () => {
+    if (isLoading || isSubmitting) return;
+
+    try {
+      setIsSubmitting(true);
+
+      // Utiliser l'avatar par défaut si aucun n'est sélectionné
+      const finalAvatarUrl = avatar || `https://api.a0.dev/assets/image?text=avatar%20letter%20${firstLetter}&aspect=1:1`;
+
+      // Inscription finale avec toutes les données collectées
+      const signupResult = await signUp(emailOrPhone, password, false, {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        gender: gender,
+        birthdate: birthDate, // Utiliser birthDate corrigé
+        // L'avatar sera téléchargé séparément après inscription si c'est un fichier local
+      });
+
+      // Après l'inscription réussie (si aucune erreur n'est levée), vérifier s'il y a un avatar local à télécharger
+      // Supprimer la vérification de signupResult car la fonction retourne void
+      if (avatar && avatar.startsWith('file://')) {
+        try {
+          console.log('Téléchargement de la photo de profil après inscription...');
+          // Utiliser l'API de photo de profil pour les photos locales
+          await authApi.uploadProfilePicture(avatar);
+          console.log('Photo de profil téléchargée avec succès');
+        } catch (uploadError) {
+          console.error('Erreur lors du téléchargement de la photo de profil:', uploadError);
+          // Continuer même en cas d'erreur - l'utilisateur pourra réessayer plus tard
+          Alert.alert("Erreur d'upload", "Votre compte a été créé, mais une erreur est survenue lors du téléchargement de votre photo. Vous pourrez la modifier plus tard dans votre profil.");
+        }
+      } else if (avatar && avatar.includes('api.a0.dev/assets/image')) {
+         // Si c'est un avatar généré par l'API, on ne fait rien de spécial ici pour l'instant.
+         console.log("Utilisation d'un avatar généré par l'API.");
+      }
+
+
+      // Naviguer vers l'écran "Trouve tes amis" après l'inscription réussie
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'FindFriends' }],
+      });
+    } catch (error: any) {
+      console.error("Erreur lors de l'inscription finale:", error);
+      setIsSubmitting(false);
+      Alert.alert(
+        "Erreur d'inscription",
+        error.message || "Une erreur est survenue lors de la création de votre compte. Veuillez réessayer."
+      );
+    }
   };
-  
+
+  // Fonctions pour ouvrir les liens légaux
+  const openPrivacyPolicy = () => {
+    Linking.openURL('https://example.com/privacy-policy'); // Mettre la vraie URL
+  };
+
+  const openTermsOfService = () => {
+    Linking.openURL('https://example.com/terms-of-service'); // Mettre la vraie URL
+  };
+
   // Fonction pour prendre une photo avec l'appareil photo
   const handleTakePhoto = async () => {
     try {
@@ -135,6 +184,8 @@ const SignupProfileScreen = () => {
       });
       
       if (!result.canceled && result.assets && result.assets.length > 0) {
+        // Pour l'inscription, on stocke juste l'URI de l'image localement
+        // L'upload se fera après la création du compte
         setAvatar(result.assets[0].uri);
       }
     } catch (error) {
@@ -154,6 +205,8 @@ const SignupProfileScreen = () => {
       });
       
       if (!result.canceled && result.assets && result.assets.length > 0) {
+        // Pour l'inscription, on stocke juste l'URI de l'image localement
+        // L'upload se fera après la création du compte
         setAvatar(result.assets[0].uri);
       }
     } catch (error) {
@@ -162,19 +215,33 @@ const SignupProfileScreen = () => {
     }
   };
   
-  // Afficher les options pour prendre une photo ou choisir depuis la galerie
-  const handlePhotoUpload = () => {
+  // Demander les permissions et afficher les options pour prendre/choisir une photo
+  const handlePhotoUpload = async () => {
+    // Demander les permissions ici
+    const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
+    const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (cameraStatus !== 'granted' || libraryStatus !== 'granted') {
+      Alert.alert(
+        "Permissions requises",
+        "L'accès à la caméra et à la galerie est nécessaire pour ajouter une photo. Veuillez activer les permissions dans les réglages de votre téléphone.",
+        [{ text: "OK" }]
+      );
+      return; // Arrêter si les permissions ne sont pas accordées
+    }
+
+    // Si les permissions sont accordées, afficher l'alerte de choix
     Alert.alert(
       "Photo de profil",
       "Choisissez une source pour votre photo de profil",
       [
         {
           text: "Appareil photo",
-          onPress: handleTakePhoto
+          onPress: handleTakePhoto // handleTakePhoto n'a plus besoin de vérifier les permissions
         },
         {
           text: "Galerie",
-          onPress: handleSelectFromGallery
+          onPress: handleSelectFromGallery // handleSelectFromGallery n'a plus besoin de vérifier les permissions
         },
         {
           text: "Annuler",
@@ -187,7 +254,7 @@ const SignupProfileScreen = () => {
   // Calculer l'interpolation pour l'animation du dégradé
   const progressWidth = progressAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0%', '83.4%'] // 5/6 pour la cinquième étape
+    outputRange: ['0%', '100%'] // 6/6 pour la dernière étape
   });
   
   // Animation de l'avatar
@@ -294,6 +361,25 @@ const SignupProfileScreen = () => {
             </TouchableOpacity>
           </Animated.View>
           
+          {/* Section légale avec animation */}
+          <Animated.View
+            style={[
+              styles.legalContainer,
+              { opacity: legalAnim }
+            ]}
+          >
+            <Text style={styles.legalText}>
+              En continuant, vous acceptez notre{' '}
+              <Text style={styles.linkText} onPress={openPrivacyPolicy}>
+                Politique de confidentialité
+              </Text>{' '}
+              et{' '}
+              <Text style={styles.linkText} onPress={openTermsOfService}>
+                Conditions d'utilisation
+              </Text>
+            </Text>
+          </Animated.View>
+
           {/* Bouton continuer animé */}
           <Animated.View
             style={[
@@ -305,13 +391,13 @@ const SignupProfileScreen = () => {
             ]}
           >
             <TouchableOpacity
-              style={[styles.continueButton, isLoading && styles.disabledButton]}
+              style={[styles.continueButton, (isLoading || isSubmitting) && styles.disabledButton]}
               onPress={handleComplete}
-              disabled={isLoading}
+              disabled={isLoading || isSubmitting}
               activeOpacity={0.8}
             >
               <Text style={styles.continueButtonText}>
-                {isLoading ? 'Chargement...' : 'Terminer'}
+                {(isLoading || isSubmitting) ? 'Création...' : 'Créer mon compte'}
               </Text>
             </TouchableOpacity>
           </Animated.View>
@@ -460,12 +546,28 @@ const styles = StyleSheet.create({
     color: '#999',
     marginLeft: 10,
   },
+  legalContainer: { // Styles pour la section légale
+    paddingHorizontal: 20,
+    marginTop: 20, // Ajuster l'espacement
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  legalText: {
+    fontSize: 13,
+    color: '#999',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  linkText: {
+    color: '#ccc',
+    textDecorationLine: 'underline',
+  },
   continueButtonContainer: {
     width: '100%',
-    position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 40 : 30,
-    left: 20,
-    right: 20,
+    // Pas position absolute, intégré dans le flux normal avant la fin du scroll
+    paddingHorizontal: 20, // Ajouter padding horizontal
+    paddingBottom: Platform.OS === 'ios' ? 40 : 30, // Espace en bas
+    marginTop: 10, // Espace au dessus du bouton
   },
   continueButton: {
     backgroundColor: 'white',

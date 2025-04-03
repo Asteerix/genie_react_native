@@ -20,11 +20,11 @@ const CONFIG_FILE_PATH = path.join(__dirname, 'config.ts');
 const ENVIRONMENTS = {
   LOCAL: {
     name: 'local',
-    url: 'http://localhost:8080'
+    url: 'https://https://6de4-92-184-145-214.ngrok-free.app'
   },
   NGROK: {
     name: 'ngrok',
-    url: 'https://aef6-2a01-cb08-1072-fd00-cd0e-61e5-dc20-44f3.ngrok-free.app'
+    url: 'https://6de4-92-184-145-214.ngrok-free.app'
   }
 };
 

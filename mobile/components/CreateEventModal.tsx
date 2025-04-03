@@ -11,18 +11,23 @@ import {
   TextInput,
   SafeAreaView,
   Platform,
-  FlatList,
+  SectionList, // Utiliser SectionList
+  SectionListData,
+  DefaultSectionT,
   Animated,
   Easing,
   Dimensions,
   BackHandler,
   Keyboard,
   PanResponder,
-  SectionList
+  ActivityIndicator // Ajouter ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { toast } from 'sonner-native';
 import _ from 'lodash';
+import { useEvents } from '../context/EventContext';
+import { parse, isPast, addYears, differenceInDays, setYear, isValid as isDateValid } from 'date-fns'; // Importer les fonctions date-fns nécessaires et isValid
+import { fr } from 'date-fns/locale'; // Importer la locale fr
 
 // Obtenir les dimensions de l'écran
 const { width, height } = Dimensions.get('window');
@@ -30,17 +35,19 @@ const { width, height } = Dimensions.get('window');
 // Définition des types d'événements
 type EventType = 'collectif' | 'individuel' | 'special';
 
-interface EventDefinition {
+export interface EventDefinition {
   id: string;
   name: string;
   type: EventType;
   icon: string;
   emojis: string[];
-  defaultDate?: string;
+  defaultDate?: string; // Format attendu: "JJ Mois" (ex: "25 Décembre")
   invitations: string;
   info?: string;
   dateFormat?: 'fixed' | 'personal';
   selected?: boolean;
+  // Ajout pour le tri
+  nextOccurrence?: Date | null;
 }
 
 // ID constant pour le toast de sélection (pour éviter les empilements)
@@ -48,340 +55,103 @@ const SELECTION_TOAST_ID = 'event-selection-toast';
 
 // Liste complète des événements correspondant exactement au tableau
 const PREDEFINED_EVENTS: EventDefinition[] = [
-  {
-    id: 'noel',
-    name: 'Noël',
-    type: 'collectif',
-    icon: '🎄',
-    emojis: ['🎄', '🎅', '☃️', '❄️'],
-    defaultDate: '25 Décembre',
-    invitations: 'Tous le monde',
-    selected: true
-  },
-  {
-    id: 'saint-valentin',
-    name: 'Saint Valentin',
-    type: 'collectif',
-    icon: '❤️',
-    emojis: ['🌹', '💝', '❤️', '🏹'],
-    defaultDate: '14 Février',
-    invitations: 'Qu\'1 personne de +15 ans'
-  },
-  {
-    id: 'nouvel-an-lunaire',
-    name: 'Nouvel an lunaire',
-    type: 'collectif',
-    icon: '🧧',
-    emojis: ['🧧', '🌙', '🎊', '🌛'],
-    defaultDate: '29 Janvier',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'nouvel-an',
-    name: 'Nouvel an',
-    type: 'collectif',
-    icon: '🎆',
-    emojis: ['🎆', '🍾', '⚡', '🎇'],
-    defaultDate: '1 Janvier',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'kwanzaa',
-    name: 'Kwanzaa',
-    type: 'collectif',
-    icon: '🕯️',
-    emojis: ['🕯️', '🎁', '🥣', '🎵'],
-    defaultDate: '26 Décembre',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'raksha-bandhan',
-    name: 'Raksha Bandhan',
-    type: 'collectif',
-    icon: '🪢',
-    emojis: ['🪢', '🌸', '🥣', '🍲'],
-    defaultDate: '19 Août',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'vesak',
-    name: 'Vesak',
-    type: 'collectif',
-    icon: '🪷',
-    emojis: ['🪷', '⛩️', '🍵', '🏮'],
-    defaultDate: '15 Mai',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'pesach',
-    name: 'Pesach',
-    type: 'collectif',
-    icon: '🍷',
-    emojis: ['🍷', '🔥', '✡️', '🕯️'],
-    defaultDate: '15 Avril',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'hanoukka',
-    name: 'Hanoukka',
-    type: 'collectif',
-    icon: '🕎',
-    emojis: ['🕎', '🕯️', '🥣', '✡️'],
-    defaultDate: '25 Décembre',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'diwali',
-    name: 'Diwali',
-    type: 'collectif',
-    icon: '🪔',
-    emojis: ['🪔', '🧨', '🎆', '✨'],
-    defaultDate: '31 Octobre',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'eid-al-adha',
-    name: 'Eid al-Adha',
-    type: 'collectif',
-    icon: '🐑',
-    emojis: ['🐑', '☪️', '🥘', '🕌'],
-    defaultDate: '5 Juin',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'eid-al-fitr',
-    name: 'Eid al-Fitr',
-    type: 'collectif',
-    icon: '🌙',
-    emojis: ['🌙', '☪️', '🥘', '🕌'],
-    defaultDate: '25 Mars',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'carnaval',
-    name: 'Carnaval',
-    type: 'collectif',
-    icon: '🎭',
-    emojis: ['🎭', '🎺', '🎊', '🥁'],
-    defaultDate: '27 Février',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'mi-automne',
-    name: 'Mi-automne',
-    type: 'collectif',
-    icon: '🥮',
-    emojis: ['🥮', '🌙', '🎊', '🧧'],
-    defaultDate: '17 Septembre',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'saint-jean',
-    name: 'Saint-Jean',
-    type: 'collectif',
-    icon: '🔥',
-    emojis: ['🔥', '🎆', '🎇', '🪄'],
-    defaultDate: '24 Juin',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'anniversaire',
-    name: 'Anniversaire',
-    type: 'individuel',
-    icon: '🎂',
-    emojis: ['🎂', '🎉', '🍰', '🥳'],
-    invitations: 'Tous le monde',
-    info: 'C\'est l\'anniversaire de...',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'fiancailles',
-    name: 'Fiançailles',
-    type: 'individuel',
-    icon: '💍',
-    emojis: ['💍', '🔨', '💝', '🥂'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'mariage',
-    name: 'Mariage',
-    type: 'individuel',
-    icon: '💍',
-    emojis: ['💍', '👰', '💒', '🤵'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'bapteme',
-    name: 'Baptême',
-    type: 'individuel',
-    icon: '👶',
-    emojis: ['👶', '🎁', '🕊️', '🙏'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'communion',
-    name: 'Communion',
-    type: 'individuel',
-    icon: '🙏',
-    emojis: ['🙏', '✝️', '🎀', '📖'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'confirmation',
-    name: 'Confirmation',
-    type: 'individuel',
-    icon: '✝️',
-    emojis: ['✝️', '🙏', '🎀', '📖'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'naissance',
-    name: 'Naissance',
-    type: 'individuel',
-    icon: '👶',
-    emojis: ['👶', '🍼', '🧸', '👼'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'baby-shower',
-    name: 'Baby Shower',
-    type: 'individuel',
-    icon: '🧸',
-    emojis: ['🧸', '👶', '🎀', '🍼'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'gender-reveal',
-    name: 'Gender Reveal',
-    type: 'individuel',
-    icon: '👶',
-    emojis: ['👶', '🍼', '💙', '💕'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'fete-des-peres',
-    name: 'Fête des pères',
-    type: 'individuel',
-    icon: '👨',
-    emojis: ['👨', '👴', '🎁', '❤️'],
-    defaultDate: '16 Juin',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'fete-des-meres',
-    name: 'Fête des mères',
-    type: 'individuel',
-    icon: '👩',
-    emojis: ['👩', '🌸', '🎁', '❤️'],
-    defaultDate: '25 Mai',
-    invitations: 'Tous le monde'
-  },
-  {
-    id: 'retraite',
-    name: 'Retraite',
-    type: 'individuel',
-    icon: '🏖️',
-    emojis: ['🏖️', '🧓', '🎉', '🚶'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'pot-de-depart',
-    name: 'Pot de départ',
-    type: 'individuel',
-    icon: '🥂',
-    emojis: ['🥂', '🍾', '⚡', '🚶'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'a-la-maison',
-    name: 'À la maison',
-    type: 'individuel',
-    icon: '🏡',
-    emojis: ['🏡', '🍕', '🎮', '🌱'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'remise-diplomes',
-    name: 'Remise diplômes',
-    type: 'individuel',
-    icon: '🎓',
-    emojis: ['🎓', '📜', '🎊', '🎉'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'cremaillere',
-    name: 'Crémaillère',
-    type: 'individuel',
-    icon: '🏠',
-    emojis: ['🏠', '🔨', '🎁', '🥂'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'quinceanera',
-    name: 'Quinceañera',
-    type: 'individuel',
-    icon: '👑',
-    emojis: ['👑', '💃', '🎀', '🎊'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'bar-bat-mitzvah',
-    name: 'Bar/Bat Mitzvah',
-    type: 'individuel',
-    icon: '✡️',
-    emojis: ['✡️', '🕯️', '📖', '🎁'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'secret-santa',
-    name: 'Secret Santa',
-    type: 'special',
-    icon: '🎅',
-    emojis: ['🎅', '🎁', '🎄', '🎀'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'custom-collectif',
-    name: 'Custom',
-    type: 'collectif',
-    icon: '🎮',
-    emojis: ['🎮', '🎨', '🎯', '🪄'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  },
-  {
-    id: 'custom-individuel',
-    name: 'Custom',
-    type: 'individuel',
-    icon: '🎮',
-    emojis: ['🎮', '🎨', '🎯', '🪄'],
-    invitations: 'Tous le monde',
-    dateFormat: 'personal'
-  }
+  { id: 'noel', name: 'Noël', type: 'collectif', icon: '🎄', emojis: ['🎄', '🎅', '☃️', '❄️'], defaultDate: '25 Décembre', invitations: 'Tous le monde', selected: true },
+  { id: 'saint-valentin', name: 'Saint Valentin', type: 'collectif', icon: '❤️', emojis: ['🌹', '💝', '❤️', '🏹'], defaultDate: '14 Février', invitations: 'Qu\'1 personne de +15 ans' },
+  { id: 'nouvel-an-lunaire', name: 'Nouvel an lunaire', type: 'collectif', icon: '🧧', emojis: ['🧧', '🌙', '🎊', '🌛'], defaultDate: '29 Janvier', invitations: 'Tous le monde' }, // Note: Date variable, exemple fixe ici
+  { id: 'nouvel-an', name: 'Nouvel an', type: 'collectif', icon: '🎆', emojis: ['🎆', '🍾', '⚡', '🎇'], defaultDate: '1 Janvier', invitations: 'Tous le monde' },
+  { id: 'kwanzaa', name: 'Kwanzaa', type: 'collectif', icon: '🕯️', emojis: ['🕯️', '🎁', '🥣', '🎵'], defaultDate: '26 Décembre', invitations: 'Tous le monde' },
+  { id: 'raksha-bandhan', name: 'Raksha Bandhan', type: 'collectif', icon: '🪢', emojis: ['🪢', '🌸', '🥣', '🍲'], defaultDate: '19 Août', invitations: 'Tous le monde' },
+  { id: 'vesak', name: 'Vesak', type: 'collectif', icon: '🪷', emojis: ['🪷', '⛩️', '🍵', '🏮'], defaultDate: '15 Mai', invitations: 'Tous le monde' },
+  { id: 'pesach', name: 'Pesach', type: 'collectif', icon: '🍷', emojis: ['🍷', '🔥', '✡️', '🕯️'], defaultDate: '15 Avril', invitations: 'Tous le monde' }, // Note: Date variable
+  { id: 'hanoukka', name: 'Hanoukka', type: 'collectif', icon: '🕎', emojis: ['🕎', '🕯️', '🥣', '✡️'], defaultDate: '25 Décembre', invitations: 'Tous le monde' }, // Note: Date variable
+  { id: 'diwali', name: 'Diwali', type: 'collectif', icon: '🪔', emojis: ['🪔', '🧨', '🎆', '✨'], defaultDate: '31 Octobre', invitations: 'Tous le monde' }, // Note: Date variable
+  { id: 'eid-al-adha', name: 'Eid al-Adha', type: 'collectif', icon: '🐑', emojis: ['🐑', '☪️', '🥘', '🕌'], defaultDate: '5 Juin', invitations: 'Tous le monde' }, // Note: Date variable
+  { id: 'eid-al-fitr', name: 'Eid al-Fitr', type: 'collectif', icon: '🌙', emojis: ['🌙', '☪️', '🥘', '🕌'], defaultDate: '25 Mars', invitations: 'Tous le monde' }, // Note: Date variable
+  { id: 'carnaval', name: 'Carnaval', type: 'collectif', icon: '🎭', emojis: ['🎭', '🎺', '🎊', '🥁'], defaultDate: '27 Février', invitations: 'Tous le monde' }, // Note: Date variable
+  { id: 'mi-automne', name: 'Mi-automne', type: 'collectif', icon: '🥮', emojis: ['🥮', '🌙', '🎊', '🧧'], defaultDate: '17 Septembre', invitations: 'Tous le monde' }, // Note: Date variable
+  { id: 'saint-jean', name: 'Saint-Jean', type: 'collectif', icon: '🔥', emojis: ['🔥', '🎆', '🎇', '🪄'], defaultDate: '24 Juin', invitations: 'Tous le monde' },
+  { id: 'anniversaire', name: 'Anniversaire', type: 'individuel', icon: '🎂', emojis: ['🎂', '🎉', '🍰', '🥳'], invitations: 'Tous le monde', info: 'C\'est l\'anniversaire de...', dateFormat: 'personal' },
+  { id: 'anniversaire-surprise', name: 'Anniversaire surprise', type: 'individuel', icon: '🤫', emojis: ['🤫', '🎂', '🎉', '🎁'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'fiancailles', name: 'Fiançailles', type: 'individuel', icon: '💍', emojis: ['💍', '🔨', '💝', '🥂'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'mariage', name: 'Mariage', type: 'individuel', icon: '💍', emojis: ['💍', '👰', '💒', '🤵'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'pacs', name: 'PACS', type: 'individuel', icon: '🤝', emojis: ['🤝', '❤️', '🥂', '📜'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'bapteme', name: 'Baptême', type: 'individuel', icon: '👶', emojis: ['👶', '🎁', '🕊️', '🙏'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'communion', name: 'Communion', type: 'individuel', icon: '🙏', emojis: ['🙏', '✝️', '🎀', '📖'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'confirmation', name: 'Confirmation', type: 'individuel', icon: '✝️', emojis: ['✝️', '🙏', '🎀', '📖'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'naissance', name: 'Naissance', type: 'individuel', icon: '👶', emojis: ['👶', '🍼', '🧸', '👼'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'baby-shower', name: 'Baby Shower', type: 'individuel', icon: '🧸', emojis: ['🧸', '👶', '🎀', '🍼'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'gender-reveal', name: 'Gender Reveal', type: 'individuel', icon: '👶', emojis: ['👶', '🍼', '💙', '💕'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'fete-des-peres', name: 'Fête des pères', type: 'individuel', icon: '👨', emojis: ['👨', '👴', '🎁', '❤️'], defaultDate: '16 Juin', invitations: 'Tous le monde' },
+  { id: 'fete-des-meres', name: 'Fête des mères', type: 'individuel', icon: '👩', emojis: ['👩', '🌸', '🎁', '❤️'], defaultDate: '25 Mai', invitations: 'Tous le monde' }, // Note: Date variable en France
+  { id: 'retraite', name: 'Retraite', type: 'individuel', icon: '🏖️', emojis: ['🏖️', '🧓', '🎉', '🚶'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'pot-de-depart', name: 'Pot de départ', type: 'individuel', icon: '🥂', emojis: ['🥂', '🍾', '⚡', '🚶'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'a-la-maison', name: 'À la maison', type: 'individuel', icon: '🏡', emojis: ['🏡', '🍕', '🎮', '🌱'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'remise-diplomes', name: 'Remise diplômes', type: 'individuel', icon: '🎓', emojis: ['🎓', '📜', '🎊', '🎉'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'cremaillere', name: 'Crémaillère', type: 'individuel', icon: '🏠', emojis: ['🏠', '🔨', '🎁', '🥂'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'quinceanera', name: 'Quinceañera', type: 'individuel', icon: '👑', emojis: ['👑', '💃', '🎀', '🎊'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'bar-bat-mitzvah', name: 'Bar/Bat Mitzvah', type: 'individuel', icon: '✡️', emojis: ['✡️', '🕯️', '📖', '🎁'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'secret-santa', name: 'Secret Santa', type: 'special', icon: '🎅', emojis: ['🎅', '🎁', '🎄', '🎀'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'custom-collectif', name: 'Custom', type: 'collectif', icon: '🎮', emojis: ['🎮', '🎨', '🎯', '🪄'], invitations: 'Tous le monde', dateFormat: 'personal' },
+  { id: 'custom-individuel', name: 'Custom', type: 'individuel', icon: '🎮', emojis: ['🎮', '🎨', '🎯', '🪄'], invitations: 'Tous le monde', dateFormat: 'personal' }
 ];
 
-// Grouper les événements par type pour la section list
-const groupedEvents = {
-  collectif: PREDEFINED_EVENTS.filter(event => event.type === 'collectif'),
-  individuel: PREDEFINED_EVENTS.filter(event => event.type === 'individuel'),
-  special: PREDEFINED_EVENTS.filter(event => event.type === 'special')
+// Liste d'IDs pour les suggestions par défaut
+const defaultSuggestionIds = ['anniversaire', 'noel', 'mariage', 'naissance', 'cremaillere', 'fete-des-meres', 'fete-des-peres', 'saint-valentin', 'nouvel-an'];
+
+// --- Fonctions utilitaires pour les dates ---
+/**
+ * Parse une chaîne de date comme "JJ Mois" (ex: "25 Décembre") en objet Date pour l'année donnée.
+ * Gère les formats "d MMMM" et "d MMM".
+ */
+const parseDateString = (dateStr: string, year: number): Date | null => {
+  try {
+    // Essayer "d MMMM" (ex: "25 Décembre")
+    let parsedDate = parse(`${dateStr} ${year}`, 'd MMMM yyyy', new Date(), { locale: fr });
+    if (isDateValid(parsedDate)) return parsedDate;
+
+    // Essayer "d MMM" (ex: "1 Jan")
+    parsedDate = parse(`${dateStr} ${year}`, 'd MMM yyyy', new Date(), { locale: fr });
+    if (isDateValid(parsedDate)) return parsedDate;
+
+    console.warn(`Impossible de parser la date: ${dateStr} pour l'année ${year}`);
+    return null;
+  } catch (error) {
+    console.error(`Erreur lors du parsing de la date "${dateStr}":`, error);
+    return null;
+  }
 };
+
+/**
+ * Calcule la prochaine occurrence d'une date fixe (JJ Mois).
+ * Retourne null si la date ne peut être parsée ou n'a pas de defaultDate.
+ */
+const getNextOccurrence = (event: EventDefinition): Date | null => {
+  if (!event.defaultDate) return null;
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  const dateThisYear = parseDateString(event.defaultDate, currentYear);
+
+  if (dateThisYear) {
+    // Si la date de cette année est déjà passée (strictement avant aujourd'hui),
+    // prendre celle de l'année prochaine.
+    if (isPast(dateThisYear) && !isDateValid(parse(`${event.defaultDate} ${currentYear}`, 'd MMMM yyyy', now, { locale: fr }))) {
+       // Correction: Vérifier si la date est passée ET si ce n'est pas aujourd'hui
+       // Si la date parsée est invalide ou si elle est strictement passée
+       const dateNextYear = addYears(dateThisYear, 1);
+       // Re-parser pour s'assurer que l'année suivante est valide (ex: année bissextile)
+       const validatedDateNextYear = parseDateString(event.defaultDate, currentYear + 1);
+       return validatedDateNextYear;
+    }
+     // Si la date est aujourd'hui ou future, c'est la bonne date pour cette année
+    return dateThisYear;
+  }
+
+  return null; // Retourne null si la date ne peut pas être parsée
+};
+// --- Fin des fonctions utilitaires ---
+
 
 interface CreateEventModalProps {
   visible: boolean;
@@ -389,23 +159,23 @@ interface CreateEventModalProps {
   onEventSelect?: (event: EventDefinition) => void;
 }
 
-// Composant séparé pour les éléments d'événement (pour éviter l'erreur de hooks)
-const EventItem = memo(({ 
-  item, 
-  onSelect, 
-  isSelected 
-}: { 
-  item: EventDefinition; 
-  onSelect: (id: string) => void; 
+// Composant séparé pour les éléments d'événement
+const EventItem = memo(({
+  item,
+  onSelect,
+  isSelected
+}: {
+  item: EventDefinition;
+  onSelect: (id: string) => void;
   isSelected: boolean;
 }) => {
   const scaleAnimation = useRef(new Animated.Value(1)).current;
-  
+
   useEffect(() => {
     if (isSelected) {
       Animated.sequence([
         Animated.timing(scaleAnimation, {
-          toValue: 0.97, 
+          toValue: 0.97,
           duration: 100,
           useNativeDriver: true
         }),
@@ -416,9 +186,17 @@ const EventItem = memo(({
           useNativeDriver: true
         })
       ]).start();
+    } else {
+      // Assurer que l'échelle revient à 1 si désélectionné
+      Animated.timing(scaleAnimation, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: true
+      }).start();
     }
   }, [isSelected, scaleAnimation]);
-  
+
+
   return (
     <Animated.View
       style={{
@@ -448,19 +226,19 @@ const EventItem = memo(({
 });
 
 // Composant pour le tooltip
-const SearchTooltip = memo(({ 
-  visible, 
-  opacity, 
-  onClose 
-}: { 
-  visible: boolean; 
-  opacity: Animated.Value; 
+const SearchTooltip = memo(({
+  visible,
+  opacity,
+  onClose
+}: {
+  visible: boolean;
+  opacity: Animated.Value;
   onClose: () => void;
 }) => {
   if (!visible) return null;
-  
+
   return (
-    <Animated.View 
+    <Animated.View
       style={[
         styles.tooltipContainer,
         { opacity }
@@ -482,9 +260,9 @@ const SearchTooltip = memo(({
 });
 
 // Composant pour l'en-tête de section
-const SectionHeader = memo(({ 
-  title 
-}: { 
+const SectionHeader = memo(({
+  title
+}: {
   title: string;
 }) => {
   return (
@@ -502,24 +280,17 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
 }) => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredEvents, setFilteredEvents] = useState<EventDefinition[]>(PREDEFINED_EVENTS);
+  const [sections, setSections] = useState<SectionListData<EventDefinition, DefaultSectionT>[]>([]);
   const [showTooltip, setShowTooltip] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [currentSelection, setCurrentSelection] = useState<string | null>(null);
-  const [useSectionList, setUseSectionList] = useState(false);
-  
-  // Préparer les données pour la SectionList
-  const sectionListData = [
-    { title: 'Événements collectifs', data: groupedEvents.collectif },
-    { title: 'Événements individuels', data: groupedEvents.individuel },
-    { title: 'Événements spéciaux', data: groupedEvents.special }
-  ];
-  
+  const [isLoading, setIsLoading] = useState(true); // État de chargement initial
+
   // Animations
   const slideAnimation = useRef(new Animated.Value(0)).current;
   const tooltipOpacity = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
-  const listRef = useRef<FlatList | SectionList>(null);
+  const listRef = useRef<SectionList>(null);
 
   // Animation pour le swipe de fermeture
   const panY = useRef(new Animated.Value(0)).current;
@@ -529,17 +300,14 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderMove: (_, gestureState) => {
-        // Limite le déplacement vers le haut
         if (gestureState.dy > 0) {
           panY.setValue(gestureState.dy);
         }
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy > 80) {
-          // Si le swipe est assez grand, fermer le modal
           closeWithAnimation();
         } else {
-          // Sinon, revenir à la position initiale
           Animated.spring(panY, {
             toValue: 0,
             useNativeDriver: true,
@@ -559,24 +327,99 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
       }
       return false;
     });
-
     return () => backHandler.remove();
   }, [visible]);
+
+  // Préparer les données des sections initiales avec tri par date
+  const prepareInitialSections = useCallback(() => {
+    setIsLoading(true);
+    const now = new Date();
+    // Créer une map pour un accès rapide aux événements
+    const eventMap = new Map(PREDEFINED_EVENTS.map(event => [event.id, event]));
+
+    // Obtenir les événements suggérés par défaut et calculer leur prochaine occurrence
+    const suggestedEventsWithDate = defaultSuggestionIds
+      .map(id => eventMap.get(id))
+      .filter((event): event is EventDefinition => !!event)
+      .map(event => ({
+        ...event,
+        nextOccurrence: getNextOccurrence(event) // Utiliser la fonction corrigée
+      }));
+
+    // Trier les événements suggérés
+    suggestedEventsWithDate.sort((a, b) => {
+      // Ceux sans date ou date invalide vont à la fin
+      if (!a.nextOccurrence) return 1;
+      if (!b.nextOccurrence) return -1;
+      // Trier par date la plus proche (différence absolue en jours)
+      const diffA = Math.abs(differenceInDays(a.nextOccurrence, now));
+      const diffB = Math.abs(differenceInDays(b.nextOccurrence, now));
+      return diffA - diffB;
+    });
+
+    // Obtenir les autres événements (non suggérés)
+    const otherEventIds = new Set(defaultSuggestionIds);
+    const otherEvents = PREDEFINED_EVENTS.filter(event => !otherEventIds.has(event.id));
+
+    // Grouper les autres événements par type
+    const otherGrouped = {
+      collectif: otherEvents.filter(event => event.type === 'collectif'),
+      individuel: otherEvents.filter(event => event.type === 'individuel'),
+      special: otherEvents.filter(event => event.type === 'special')
+    };
+
+    // Construire les sections
+    const initialSections: SectionListData<EventDefinition, DefaultSectionT>[] = [];
+
+    if (suggestedEventsWithDate.length > 0) {
+      initialSections.push({ title: 'Suggestions', data: suggestedEventsWithDate });
+    }
+
+    if (otherGrouped.collectif.length > 0) {
+      initialSections.push({ title: 'Événements collectifs', data: otherGrouped.collectif });
+    }
+    if (otherGrouped.individuel.length > 0) {
+      initialSections.push({ title: 'Événements individuels', data: otherGrouped.individuel });
+    }
+    if (otherGrouped.special.length > 0) {
+      initialSections.push({ title: 'Événements spéciaux', data: otherGrouped.special });
+    }
+
+    // Appliquer la sélection actuelle (si elle existe)
+     const sectionsWithSelection = initialSections.map(section => ({
+        ...section,
+        data: section.data.map(event => ({
+          ...event,
+          selected: event.id === currentSelection
+        }))
+      }));
+
+    setSections(sectionsWithSelection);
+    setIsLoading(false);
+  }, [currentSelection]); // Dépend de currentSelection pour réappliquer la sélection
+
+  // Charger les sections initiales quand le modal devient visible
+  useEffect(() => {
+    if (visible) {
+      prepareInitialSections();
+    }
+  }, [visible, prepareInitialSections]);
+
 
   // Animation d'entrée et de sortie du modal
   useEffect(() => {
     if (visible) {
       // Initialiser l'état
       setSearchQuery('');
-      setFilteredEvents(PREDEFINED_EVENTS);
       setShowTooltip(false);
       panY.setValue(0);
-      
+      // Ne pas réinitialiser currentSelection ici pour le garder entre ouvertures/fermetures
+
       // Démarrer l'animation d'entrée
       Animated.timing(slideAnimation, {
         toValue: 1,
         duration: 350,
-        easing: Easing.out(Easing.bezier(0.16, 1, 0.3, 1)), // Courbe d'animation optimisée
+        easing: Easing.out(Easing.bezier(0.16, 1, 0.3, 1)),
         useNativeDriver: true,
       }).start(() => {
         // Mettre le focus sur le champ de recherche après l'animation
@@ -591,10 +434,7 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
 
   // Fermeture avec animation
   const closeWithAnimation = useCallback(() => {
-    // Masquer le clavier immédiatement
     Keyboard.dismiss();
-    
-    // Animation de sortie
     Animated.timing(slideAnimation, {
       toValue: 0,
       duration: 280,
@@ -605,136 +445,105 @@ const CreateEventModal: React.FC<CreateEventModalProps> = ({
     });
   }, [slideAnimation, onClose]);
 
-  // Filtrer les événements selon la recherche
+  // Filtrer les événements selon la recherche (adapte pour SectionList)
   useEffect(() => {
-    // Si le champ de recherche est vide, afficher tous les événements
     if (!searchQuery.trim()) {
-      setFilteredEvents(PREDEFINED_EVENTS);
+      // Si recherche vide, réafficher toutes les sections initiales
+      prepareInitialSections(); // Utiliser la fonction pour préparer les sections
       setShowTooltip(false);
-      setUseSectionList(false);
-      
-      // Animer la disparition du tooltip
-      Animated.timing(tooltipOpacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-      
+      Animated.timing(tooltipOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
       return;
     }
 
-    // Normaliser la recherche (ignorer les accents et la casse)
+    // Normaliser la recherche
     const normalized = searchQuery.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    
-    // Filtrer les événements qui correspondent à la recherche
-    const filtered = PREDEFINED_EVENTS.filter(event => 
+
+    // Filtrer tous les événements
+    const filtered = PREDEFINED_EVENTS.filter(event =>
       event.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(normalized)
-    );
-    
-    // S'assurer que chaque ID est unique
-    const uniqueFiltered = _.uniqBy(filtered, 'id');
-    setFilteredEvents(uniqueFiltered);
-    
-    // Désactiver la section list en mode recherche
-    setUseSectionList(false);
-    
-    // Afficher le tooltip si aucun résultat
-    if (uniqueFiltered.length === 0) {
+    ).map(event => ({ // Appliquer la sélection actuelle aux résultats filtrés
+        ...event,
+        selected: event.id === currentSelection
+    }));
+
+    // Afficher les résultats filtrés dans une seule section
+    setSections([{ title: 'Résultats de recherche', data: filtered }]);
+
+    // Gérer le tooltip
+    if (filtered.length === 0) {
       setTimeout(() => {
         setShowTooltip(true);
-        Animated.timing(tooltipOpacity, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }).start();
+        Animated.timing(tooltipOpacity, { toValue: 1, duration: 300, useNativeDriver: true }).start();
       }, 300);
     } else {
       setShowTooltip(false);
-      Animated.timing(tooltipOpacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
+      Animated.timing(tooltipOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
     }
-  }, [searchQuery, tooltipOpacity]);
+  }, [searchQuery, tooltipOpacity, currentSelection, prepareInitialSections]); // Ajouter prepareInitialSections
+
 
   // Sélectionner un événement avec animation et toast unique
   const handleEventSelect = useCallback((selectedEventId: string) => {
-    // Vérifier si c'est la même sélection que précédemment
     const isSameSelection = currentSelection === selectedEventId;
-    
-    // Mise à jour de la sélection actuelle
-    setCurrentSelection(selectedEventId);
-    
-    // Mettre à jour l'état des événements
-    const updatedEvents = PREDEFINED_EVENTS.map(event => ({
-      ...event,
-      selected: event.id === selectedEventId
-    }));
-    
-    // Mettre à jour la liste filtrée
-    if (searchQuery) {
-      const normalized = searchQuery.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      const filtered = updatedEvents.filter(event => 
-        event.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(normalized)
-      );
-      setFilteredEvents(filtered);
-    } else {
-      setFilteredEvents(updatedEvents);
-    }
-    
-    const selectedEvent = updatedEvents.find(event => event.id === selectedEventId);
-    if (selectedEvent) {
-      // Fermer le clavier
-      Keyboard.dismiss();
-      
-      // Feedback visuel de sélection avec ID unique pour éviter l'empilement des toasts
-      if (!isSameSelection) {
-        toast.dismiss(SELECTION_TOAST_ID); // Fermer un toast existant
-        
-        setTimeout(() => {
-          toast.success(`${selectedEvent.name} sélectionné`, {
-            id: SELECTION_TOAST_ID, // Utiliser le même ID pour remplacer plutôt qu'empiler
-            duration: 2000,
-          });
-        }, 50); // Petit délai pour assurer la transition fluide
-      }
-    }
-  }, [currentSelection, searchQuery]);
+    const newSelection = isSameSelection ? null : selectedEventId; // Permettre la désélection
+    setCurrentSelection(newSelection); // Mettre à jour la sélection
 
-// Gérer le bouton Custom
-const handleCustomEvent = useCallback(() => {
-  console.log("Redirection vers le choix d'événement personnalisé");
-  
-  // Fermer le modal actuel
-  closeWithAnimation();
-  
-  // Naviguer vers l'écran de sélection du type d'événement personnalisable
-  // Utiliser un délai court pour s'assurer que le modal est fermé avant la navigation
-  setTimeout(() => {
-    navigation.navigate('CustomEventTypeSelection');
-  }, 300);
-  
-}, [closeWithAnimation, navigation]);
+    // Mettre à jour l'état des sections pour refléter la sélection visuellement
+    setSections(prevSections => prevSections.map(section => ({
+        ...section,
+        data: section.data.map(event => ({
+            ...event,
+            selected: event.id === newSelection // Utiliser newSelection
+        }))
+    })));
+
+    const selectedEvent = PREDEFINED_EVENTS.find(event => event.id === newSelection);
+    if (selectedEvent) {
+      Keyboard.dismiss();
+      // Afficher le toast seulement si un nouvel événement est sélectionné (pas à la désélection)
+      toast.dismiss(SELECTION_TOAST_ID);
+      setTimeout(() => {
+        toast.success(`${selectedEvent.name} sélectionné`, {
+          id: SELECTION_TOAST_ID,
+          duration: 2000,
+        });
+      }, 50);
+    } else if (isSameSelection) {
+        // Si on désélectionne, fermer le toast
+        toast.dismiss(SELECTION_TOAST_ID);
+    }
+  }, [currentSelection]); // Retirer searchQuery et sections des dépendances
+
+
+  // Gérer le bouton Custom
+  const handleCustomEvent = useCallback(() => {
+    console.log("Redirection vers le choix d'événement personnalisé");
+    closeWithAnimation();
+    setTimeout(() => {
+      navigation.navigate('CustomEventTypeSelection');
+    }, 300);
+  }, [closeWithAnimation, navigation]);
 
   // Continuer avec l'événement sélectionné
+  const { createNewEvent } = useEvents();
+
   const handleNext = useCallback(() => {
-    const selectedEvent = filteredEvents.find(event => event.selected) || 
-                         PREDEFINED_EVENTS.find(event => event.selected);
-    
+    // Trouver l'événement sélectionné dans la liste originale
+    const selectedEvent = PREDEFINED_EVENTS.find(event => event.id === currentSelection);
+
     if (selectedEvent) {
-      // Si un callback de sélection d'événement est fourni, l'appeler
       if (onEventSelect) {
-        onEventSelect(selectedEvent);
+        // Retirer la propriété temporaire 'nextOccurrence' avant de passer l'événement
+        const { nextOccurrence, ...eventToSend } = selectedEvent;
+        onEventSelect(eventToSend);
       }
-      
       closeWithAnimation();
     } else {
       toast.error("Veuillez sélectionner un événement", {
         duration: 2000,
       });
     }
-  }, [filteredEvents, closeWithAnimation, onEventSelect]);
+  }, [currentSelection, closeWithAnimation, onEventSelect]);
 
   // Fermer le tooltip
   const handleCloseTooltip = useCallback(() => {
@@ -747,34 +556,36 @@ const handleCustomEvent = useCallback(() => {
     });
   }, [tooltipOpacity]);
 
-  // Toggle entre la vue normale et la vue par sections
-  const toggleViewMode = useCallback(() => {
-    setUseSectionList(prev => !prev);
-    setSearchQuery(''); // Réinitialiser la recherche
-    setFilteredEvents(PREDEFINED_EVENTS);
-  }, []);
-
-  // Optimized renderItem function that doesn't include hooks
+  // Optimized renderItem function
   const renderEventItem = useCallback(({ item }: { item: EventDefinition }) => {
-    const isSelected = !!item.selected;
     return (
-      <EventItem 
-        item={item} 
-        onSelect={handleEventSelect} 
-        isSelected={isSelected} 
+      <EventItem
+        item={item}
+        onSelect={handleEventSelect}
+        isSelected={item.id === currentSelection} // Utiliser currentSelection pour déterminer l'état
       />
     );
-  }, [handleEventSelect]);
+  }, [handleEventSelect, currentSelection]);
 
   // Fonction de rendu pour l'en-tête de section
-  const renderSectionHeader = useCallback(({ section }: { section: { title: string } }) => {
+  const renderSectionHeader = useCallback(({ section }: { section: SectionListData<EventDefinition, DefaultSectionT> }) => {
+    // Ne pas afficher le header pour la section de recherche si elle est vide (sauf si tooltip visible)
+    if (searchQuery.trim() && section.title === 'Résultats de recherche' && section.data.length === 0 && !showTooltip) {
+        return null;
+    }
+     // Ne pas afficher le header pour la section de recherche si elle n'est pas vide
+    if (searchQuery.trim() && section.title === 'Résultats de recherche' && section.data.length > 0) {
+        return null; // On n'affiche pas "Résultats de recherche"
+    }
     return <SectionHeader title={section.title} />;
-  }, []);
+  }, [searchQuery, showTooltip]); // Dépend de searchQuery et showTooltip
 
   // Make sure each item has a unique key
-  const keyExtractor = useCallback((item: EventDefinition) => {
-    return `${item.id}-${item.type}`;
+  const keyExtractor = useCallback((item: EventDefinition, index: number) => {
+    // Utiliser l'index en plus de l'id pour garantir l'unicité, surtout si 'Custom' est présent plusieurs fois
+    return `${item.id}-${item.type}-${index}`;
   }, []);
+
 
   // Calculer les transformations pour l'animation
   const modalTranslateY = Animated.add(
@@ -802,7 +613,7 @@ const handleCustomEvent = useCallback(() => {
       onRequestClose={closeWithAnimation}
     >
       {/* Overlay semi-transparent */}
-      <Animated.View 
+      <Animated.View
         style={[
           styles.overlay,
           { opacity: backdropOpacity }
@@ -814,7 +625,7 @@ const handleCustomEvent = useCallback(() => {
           onPress={closeWithAnimation}
         />
       </Animated.View>
-      
+
       {/* Container du modal avec animation */}
       <Animated.View
         style={[
@@ -829,25 +640,17 @@ const handleCustomEvent = useCallback(() => {
         <View style={styles.swipeBar}>
           <View style={styles.swipeIndicator} />
         </View>
-        
+
         <SafeAreaView style={styles.modalContent}>
           {/* Header avec titre et boutons */}
           <View style={styles.header}>
             <TouchableOpacity onPress={closeWithAnimation} style={styles.closeButton}>
               <Ionicons name="close" size={24} color="black" />
             </TouchableOpacity>
-            
             <Text style={styles.title}>Créer un événement</Text>
-            
-            <TouchableOpacity onPress={toggleViewMode} style={styles.helpButton}>
-              <Ionicons 
-                name={useSectionList ? "grid-outline" : "list-outline"} 
-                size={24} 
-                color="black" 
-              />
-            </TouchableOpacity>
+            <View style={styles.placeholderButton} />
           </View>
-          
+
           {/* Barre de recherche */}
           <View style={styles.searchContainer}>
             <View style={[
@@ -868,70 +671,79 @@ const handleCustomEvent = useCallback(() => {
                 returnKeyType="search"
                 clearButtonMode="while-editing"
               />
-              <TouchableOpacity style={styles.searchAddButton}>
-                <Ionicons name="add" size={24} color="#999" />
-              </TouchableOpacity>
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  style={styles.searchClearButton}
+                  onPress={() => setSearchQuery('')}
+                >
+                  <Ionicons name="close-circle" size={20} color="#999" />
+                </TouchableOpacity>
+              )}
             </View>
           </View>
-          
+
           {/* Tooltip component */}
-          <SearchTooltip 
-            visible={showTooltip} 
-            opacity={tooltipOpacity} 
-            onClose={handleCloseTooltip} 
+          <SearchTooltip
+            visible={showTooltip}
+            opacity={tooltipOpacity}
+            onClose={handleCloseTooltip}
           />
-          
-          {/* Liste des événements - conditionnelle selon le mode de vue */}
-          {useSectionList ? (
+
+          {/* Liste des événements - SectionList */}
+          {isLoading ? (
+             <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#000" />
+             </View>
+          ) : (
             <SectionList
-              ref={listRef as React.RefObject<SectionList>}
-              sections={sectionListData}
+              ref={listRef}
+              sections={sections}
               renderItem={renderEventItem}
-              renderSectionHeader={renderSectionHeader}
-              keyExtractor={keyExtractor}
+              renderSectionHeader={renderSectionHeader} // Utiliser la fonction mémoïsée
+              keyExtractor={keyExtractor} // Utiliser la fonction mémoïsée
               style={styles.eventsList}
               contentContainerStyle={styles.eventsListContent}
-              stickySectionHeadersEnabled={true}
+              stickySectionHeadersEnabled={false} // Désactiver pour éviter superposition potentielle
               initialNumToRender={15}
               maxToRenderPerBatch={10}
               removeClippedSubviews={Platform.OS === 'android'}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
-              ListEmptyComponent={
-                <View style={styles.emptyListContainer}>
-                  <Text style={styles.emptyListText}>Aucun résultat trouvé</Text>
-                </View>
-              }
-            />
-          ) : (
-            <FlatList
-              ref={listRef as React.RefObject<FlatList>}
-              data={filteredEvents}
-              renderItem={renderEventItem}
-              keyExtractor={keyExtractor}
-              style={styles.eventsList}
-              contentContainerStyle={styles.eventsListContent}
-              initialNumToRender={15}
-              windowSize={12}
-              maxToRenderPerBatch={12}
-              removeClippedSubviews={Platform.OS === 'android'}
-              showsVerticalScrollIndicator={true}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-              bounces={true}
-              ListEmptyComponent={
-                !showTooltip ? (
-                  <View style={styles.emptyListContainer}>
-                    <Text style={styles.emptyListText}>Aucun résultat trouvé</Text>
-                  </View>
-                ) : null
-              }
+              ListEmptyComponent={() => {
+                // Condition pour afficher le bouton "Créer Custom" ou le texte "Aucun trouvé"
+                if (!isLoading && searchQuery.trim() && sections[0]?.data?.length === 0) {
+                  // Afficher le bouton si recherche active et aucun résultat
+                  return (
+                    <View style={styles.emptyListContainer}>
+                      <Text style={styles.emptyListText}>Aucun événement trouvé pour "{searchQuery}"</Text>
+                      <TouchableOpacity
+                        style={styles.createCustomButtonEmpty}
+                        onPress={handleCustomEvent}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="add-circle-outline" size={22} color="black" />
+                        <Text style={styles.createCustomButtonEmptyText}>Créer un événement custom</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                } else if (!isLoading && !showTooltip && sections.every(s => s.data.length === 0)) {
+                   // Afficher le texte si la liste est vide sans recherche active (et sans tooltip)
+                  return (
+                    <View style={styles.emptyListContainer}>
+                      <Text style={styles.emptyListText}>Aucun événement</Text>
+                    </View>
+                  );
+                }
+                // Ne rien afficher si en chargement ou si le tooltip est visible
+                return null;
+              }}
             />
           )}
-          
+
+
           {/* Bottom Buttons avec animation */}
           <View style={styles.buttonsContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.customButton}
               onPress={handleCustomEvent}
               activeOpacity={0.8}
@@ -939,17 +751,15 @@ const handleCustomEvent = useCallback(() => {
               <Ionicons name="add" size={20} color="black" />
               <Text style={styles.customButtonText}>Custom</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={[
                 styles.nextButton,
-                (filteredEvents.some(e => e.selected) || PREDEFINED_EVENTS.some(e => e.selected)) 
-                  ? styles.activeNextButton 
-                  : {}
+                currentSelection ? styles.activeNextButton : {} // Activer si une sélection existe
               ]}
               onPress={handleNext}
               activeOpacity={0.8}
-              disabled={!filteredEvents.some(e => e.selected) && !PREDEFINED_EVENTS.some(e => e.selected)}
+              disabled={!currentSelection} // Désactiver si aucune sélection
             >
               <Text style={styles.nextButtonText}>Suivant</Text>
               <Ionicons name="arrow-forward" size={20} color="white" />
@@ -1005,7 +815,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 5, 
+    paddingTop: 5,
     paddingBottom: 15,
     borderBottomWidth: 1,
     borderBottomColor: '#f5f5f5',
@@ -1018,8 +828,9 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000',
   },
-  helpButton: {
-    padding: 5,
+  placeholderButton: { // Style pour maintenir l'espacement après suppression
+    width: 34, // Largeur approximative du bouton supprimé (padding inclus)
+    height: 34, // Hauteur approximative
   },
   searchContainer: {
     paddingHorizontal: 20,
@@ -1049,8 +860,9 @@ const styles = StyleSheet.create({
     color: '#333',
     height: '100%',
   },
-  searchAddButton: {
+  searchClearButton: { // Style pour le nouveau bouton "effacer"
     padding: 5,
+    marginLeft: 5, // Ajouter un peu d'espace
   },
   tooltipContainer: {
     paddingHorizontal: 20,
@@ -1097,17 +909,19 @@ const styles = StyleSheet.create({
   eventsListContent: {
     paddingHorizontal: 20,
     paddingVertical: 10,
+    paddingBottom: 80, // Espace pour les boutons en bas
   },
   sectionHeader: {
-    backgroundColor: '#F8F8F8',
-    padding: 10,
-    marginVertical: 5,
-    borderRadius: 10,
+    backgroundColor: 'white', // Fond blanc pour éviter superposition
+    paddingTop: 10, // Espace au-dessus du titre
+    paddingBottom: 5, // Espace sous le titre
+    // Retirer marginVertical pour coller à la liste
   },
   sectionHeaderText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 15,
+    fontWeight: 'bold', // Mettre en gras
+    color: '#555', // Couleur un peu plus foncée
+    textTransform: 'uppercase', // Majuscules pour distinguer
   },
   eventItem: {
     flexDirection: 'row',
@@ -1120,7 +934,8 @@ const styles = StyleSheet.create({
     borderColor: '#F2F2F2',
   },
   selectedEventItem: {
-    backgroundColor: '#F2F2F2',
+    backgroundColor: '#E8E8E8', // Fond plus visible pour la sélection
+    borderColor: '#D0D0D0',
   },
   eventIconContainer: {
     width: 30,
@@ -1143,13 +958,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+   loadingContainer: { // Style pour le conteneur du loader
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingBottom: 80, // Pour ne pas être caché par les boutons
+  },
   emptyListContainer: {
     padding: 20,
     alignItems: 'center',
+    marginTop: 30,
   },
   emptyListText: {
     color: '#999',
     fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20, // Ajouter de l'espace avant le bouton
   },
   buttonsContainer: {
     flexDirection: 'row',
@@ -1183,19 +1007,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#999999',
+    backgroundColor: '#CCCCCC', // Gris par défaut (désactivé)
     borderRadius: 25,
     paddingVertical: 12,
     paddingHorizontal: 25,
     gap: 8,
   },
   activeNextButton: {
-    backgroundColor: '#333333',
+    backgroundColor: '#333333', // Noir quand activé
   },
   nextButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: 'white',
+  },
+  // Style pour le bouton "Créer Custom" dans la liste vide
+  createCustomButtonEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E8E8E8', // Fond légèrement différent
+    borderRadius: 25,
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    marginTop: 15, // Espace au-dessus du bouton
+    gap: 10,
+  },
+  createCustomButtonEmptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'black',
   }
 });
 

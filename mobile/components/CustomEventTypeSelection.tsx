@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react'; // Retirer useState etc.
 import {
   View,
   Text,
@@ -6,233 +6,82 @@ import {
   TouchableOpacity,
   SafeAreaView,
   StatusBar
+  // Retirer les imports inutilisés comme ScrollView, TextInput, Modal, etc.
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
-import EventTitleModal from './EventTitleModal';
-import EventDateModal from './EventDateModal';
-import EventHostModal from './EventHostModal';
-import EventOptionalInfoModal from './EventOptionalInfoModal';
-import EventIllustrationModal from './EventIllustrationModal';
+import { Event } from '../api/events'; // Garder Event pour Partial<Event>
 
-interface EventData {
-  type: 'collectif' | 'individuel';
-  title: string;
-  date: {
-    day: string;
-    month: string;
-    year: string;
-    includeTime: boolean;
-  };
-  hosts?: string[];
-  optionalInfo?: {
-    includeMoneyGoal: boolean;
-    moneyGoalAmount?: string;
-    includeLocation: boolean;
-    includeMessage: boolean;
-    includeAdmins: boolean;
-  };
-  illustration?: string;
-}
-
-type ModalStep = 'title' | 'date' | 'host' | 'optional' | 'illustration';
+// Type pour la navigation
+type CustomEventTypeNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const CustomEventTypeSelection: React.FC = () => {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const [currentStep, setCurrentStep] = useState<ModalStep>('title');
-  const [eventData, setEventData] = useState<EventData | null>(null);
+  const navigation = useNavigation<CustomEventTypeNavigationProp>();
 
-  const handleCollectiveChoice = () => {
-    setEventData({ type: 'collectif' } as EventData);
-    setCurrentStep('title');
-  };
-
-  const handleIndividualChoice = () => {
-    setEventData({ type: 'individuel' } as EventData);
-    setCurrentStep('title');
-  };
-
-  const handleTitleContinue = (title: string) => {
-    setEventData(prev => ({ ...prev!, title }));
-    setCurrentStep('date');
-  };
-
-  const handleDateContinue = (date: EventData['date']) => {
-    setEventData(prev => ({ ...prev!, date }));
-    setCurrentStep(eventData?.type === 'individuel' ? 'host' : 'optional');
-  };
-
-  const handleHostContinue = (hosts: string[]) => {
-    setEventData(prev => ({ ...prev!, hosts }));
-    setCurrentStep('optional');
-  };
-
-  const handleOptionalContinue = (optionalInfo: EventData['optionalInfo']) => {
-    setEventData(prev => ({ ...prev!, optionalInfo }));
-    setCurrentStep('illustration');
-  };
-
-  const handleIllustrationContinue = (illustration: string) => {
-    setEventData(prev => ({ ...prev!, illustration }));
-    // Navigate to EventInviteFriends screen
-    navigation.navigate('EventInviteFriends');
-  };
-
-  const handleBack = () => {
-    switch (currentStep) {
-      case 'date':
-        setCurrentStep('title');
-        break;
-      case 'host':
-        setCurrentStep('date');
-        break;
-      case 'optional':
-        setCurrentStep(eventData?.type === 'individuel' ? 'host' : 'date');
-        break;
-      case 'illustration':
-        setCurrentStep('optional');
-        break;
-      default:
-        setEventData(null);
-        setCurrentStep('title');
-    }
-  };
-
-  const handleClose = () => {
-    setEventData(null);
-    setCurrentStep('title');
+  // Navigue vers le début du flux de création avec le type choisi
+  const navigateToCreationFlow = (type: 'collectif' | 'individuel') => {
+    const initialEventData: Partial<Event> = { type };
+    // Naviguer vers la première étape (EventTitleModal)
+    navigation.navigate('EventTitleModal', { eventData: initialEventData });
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
-      
-      {/* Header avec bouton retour */}
+
+      {/* Header avec bouton retour/fermer */}
       <View style={styles.header}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation.goBack()} // Simple retour en arrière
         >
           <Ionicons name="close" size={24} color="black" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Événement Customisable</Text>
         <View style={styles.placeholder} />
       </View>
-      
+
       {/* Option Collectif */}
       <View style={styles.optionCard}>
         <Text style={styles.optionTitle}>Collectif</Text>
-        
         <View style={styles.diagram}>
-          {/* Diagramme avec icônes et flèches */}
-          <View style={styles.iconRow}>
-            <View style={styles.giftBox} />
-          </View>
-          
-          <View style={styles.peopleRow}>
-            <View style={styles.person} />
-            <View style={styles.arrows}>
-              <View style={styles.arrowRight} />
-              <View style={styles.arrowLeft} />
-            </View>
-            <View style={styles.person} />
-          </View>
-          
-          <View style={styles.iconRow}>
-            <View style={styles.giftBox} />
-          </View>
+          {/* Diagramme simplifié */}
+          <Text style={styles.diagramText}>👥 🎁 👥</Text>
         </View>
-        
         <Text style={styles.optionDescription}>
-          Chacun offre ou reçoit des cadeaux de la 
+          Chacun offre ou reçoit des cadeaux de la
           part de <Text style={styles.boldText}>chaque participants</Text>.
         </Text>
-        
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.chooseButton}
-          onPress={handleCollectiveChoice}
+          onPress={() => navigateToCreationFlow('collectif')}
         >
           <Text style={styles.buttonText}>Choisir</Text>
         </TouchableOpacity>
       </View>
-      
+
       {/* Option Individuel */}
       <View style={styles.optionCard}>
         <Text style={styles.optionTitle}>Individuel</Text>
-        
         <View style={styles.diagram}>
-          {/* Diagramme avec icônes et flèches */}
-          <View style={styles.iconRow}>
-            <View style={styles.giftBox} />
-          </View>
-          
-          <View style={styles.peopleRow}>
-            <View style={styles.multiPerson}>
-              <View style={styles.person} />
-              <View style={styles.person} />
-              <View style={styles.person} />
-            </View>
-            <View style={styles.arrows}>
-              <View style={styles.arrowRight} />
-            </View>
-            <View style={styles.person} />
-          </View>
+           {/* Diagramme simplifié */}
+           <Text style={styles.diagramText}>👥🎁👤</Text>
         </View>
-        
         <Text style={styles.optionDescription}>
           Les invités offrent des cadeaux à <Text style={styles.boldText}>l'hôte
           (une personne</Text> ou <Text style={styles.boldText}>un couple)</Text>.
         </Text>
-        
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.chooseButton}
-          onPress={handleIndividualChoice}
+          onPress={() => navigateToCreationFlow('individuel')}
         >
           <Text style={styles.buttonText}>Choisir</Text>
         </TouchableOpacity>
       </View>
 
-      {/* All modals */}
-      <EventTitleModal
-        visible={currentStep === 'title' && eventData !== null}
-        onClose={handleClose}
-        onBack={handleClose}
-        onContinue={handleTitleContinue}
-        eventType={eventData?.type}
-      />
-
-      <EventDateModal
-        visible={currentStep === 'date'}
-        onClose={handleClose}
-        onBack={handleBack}
-        onContinue={handleDateContinue}
-      />
-
-      {eventData?.type === 'individuel' && (
-        <EventHostModal
-          visible={currentStep === 'host'}
-          onClose={handleClose}
-          onBack={handleBack}
-          onContinue={handleHostContinue}
-        />
-      )}
-
-      <EventOptionalInfoModal
-        visible={currentStep === 'optional'}
-        onClose={handleClose}
-        onBack={handleBack}
-        onContinue={handleOptionalContinue}
-        isIndividual={eventData?.type === 'individuel'}
-      />
-
-      <EventIllustrationModal
-        visible={currentStep === 'illustration'}
-        onClose={handleClose}
-        onBack={handleBack}
-        onContinue={handleIllustrationContinue}
-      />
+      {/* Plus de modales rendues ici */}
     </SafeAreaView>
   );
 };
@@ -250,6 +99,7 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     borderBottomWidth: 1,
     borderBottomColor: '#EEEEEE',
+    backgroundColor: 'white', // Fond blanc pour le header
   },
   backButton: {
     padding: 5,
@@ -259,7 +109,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   placeholder: {
-    width: 34, // Same as backButton width
+    width: 34, // Pour équilibrer le bouton retour
   },
   optionCard: {
     margin: 15,
@@ -271,74 +121,43 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 5,
     elevation: 3,
+    alignItems: 'center', // Centrer le contenu de la carte
   },
   optionTitle: {
-    fontSize: 24,
+    fontSize: 22, // Légèrement réduit
     fontWeight: 'bold',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 15, // Réduit
   },
   diagram: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 20,
+    marginVertical: 15, // Réduit
+    // Retirer les styles complexes du diagramme précédent
   },
-  iconRow: {
-    alignItems: 'center',
-    marginVertical: 5,
-  },
-  giftBox: {
-    width: 20,
-    height: 20,
-    borderWidth: 1,
-    borderColor: 'black',
-  },
-  peopleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '80%',
-    marginVertical: 10,
-  },
-  person: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: 'black',
-  },
-  multiPerson: {
-    flexDirection: 'row',
-  },
-  arrows: {
-    flexDirection: 'row',
-  },
-  arrowRight: {
-    width: 30,
-    height: 2,
-    backgroundColor: 'black',
-    marginHorizontal: 5,
-  },
-  arrowLeft: {
-    width: 30,
-    height: 2,
-    backgroundColor: 'black',
-    marginHorizontal: 5,
+  diagramText: { // Style simple pour le diagramme texte
+      fontSize: 30,
+      color: '#ccc',
+      marginBottom: 10,
   },
   optionDescription: {
     textAlign: 'center',
-    fontSize: 16,
+    fontSize: 15, // Légèrement réduit
     marginBottom: 20,
-    lineHeight: 22,
+    lineHeight: 21, // Ajusté
+    color: '#555', // Couleur de texte adoucie
   },
   boldText: {
     fontWeight: 'bold',
+    color: '#333', // Couleur de texte plus foncée pour le gras
   },
   chooseButton: {
     backgroundColor: 'black',
     borderRadius: 25,
-    paddingVertical: 15,
+    paddingVertical: 12, // Réduit
+    paddingHorizontal: 50, // Augmenté pour largeur
     alignItems: 'center',
+    alignSelf: 'stretch', // Prend toute la largeur de la carte
   },
   buttonText: {
     color: 'white',

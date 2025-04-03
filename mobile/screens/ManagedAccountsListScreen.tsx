@@ -15,7 +15,7 @@ import {
   Easing,
   useWindowDimensions
 } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { Ionicons, Feather, AntDesign } from '@expo/vector-icons';
@@ -24,9 +24,12 @@ import { useManagedAccounts } from '../context/ManagedAccountsContext';
 import { ManagedAccount } from '../api/types';
 
 type ManagedAccountsListScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'ManagedAccountsList'>;
+type ManagedAccountsListScreenRouteProp = RouteProp<RootStackParamList, 'ManagedAccountsList'>;
 
 const ManagedAccountsListScreen: React.FC = () => {
   const navigation = useNavigation<ManagedAccountsListScreenNavigationProp>();
+  const route = useRoute<ManagedAccountsListScreenRouteProp>();
+  const fromSettings = route.params?.fromSettings;
   const { width, height } = useWindowDimensions();
   const isSmallDevice = height < 700;
   const { accounts, fetchAccounts, isLoading } = useManagedAccounts();
@@ -49,9 +52,32 @@ const ManagedAccountsListScreen: React.FC = () => {
   const [showButtonShadow, setShowButtonShadow] = useState(false);
   const [isScrolledToBottom, setIsScrolledToBottom] = useState(true);
   
+  // Helper function to safely generate usernames
+  const safeUsername = (account: ManagedAccount) => {
+    // Safety check for the account object
+    if (!account) return 'user';
+    
+    // Safety check for the account id
+    const safeId = account.id ? account.id.substring(0, 5) : '00000';
+    
+    // If neither firstName nor lastName exists
+    if (!account.firstName && !account.lastName) return `user_${safeId}`;
+    
+    // Create baseText safely
+    const baseText = `${account.firstName || ''}${account.lastName || ''}`;
+    
+    // Return cleaned username or fallback
+    return baseText ? baseText.toLowerCase().replace(/[^a-z0-9]/g, '') : `user_${safeId}`;
+  };
+  
   // Fetch accounts when component mounts
   useEffect(() => {
-    fetchAccounts();
+    console.log('ManagedAccountsListScreen mounted, fetching accounts...');
+    fetchAccounts().then(() => {
+      console.log('Fetch accounts completed in ManagedAccountsListScreen');
+    }).catch(err => {
+      console.error('Error fetching accounts in ManagedAccountsListScreen:', err);
+    });
   }, []);
   
   // Animations when the screen comes into focus
@@ -124,19 +150,21 @@ const ManagedAccountsListScreen: React.FC = () => {
   };
 
   const handleFinish = () => {
-    console.log("Navigation vers l'écran principal");
-    
-    // Réinitialiser la pile de navigation avec Wishlist comme écran principal
-    // Wishlist est un écran qui existe réellement dans App.tsx
-    navigation.reset({
-      index: 0,
-      routes: [{ name: 'Wishlist' }], // Utiliser un écran qui existe dans App.tsx
-    });
+    if (fromSettings) {
+      // Si on vient des paramètres, rediriger vers les paramètres
+      navigation.navigate('Settings');
+    } else {
+      // Sinon, réinitialiser la pile de navigation avec Wishlist comme écran principal
+      // Wishlist est un écran qui existe réellement dans App.tsx
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'HomePage' }], // Utiliser un écran qui existe dans App.tsx
+      });
+    }
   };
 
   const handleAccountPress = (account: ManagedAccount) => {
     // In a real app, this would navigate to account details/edit screen
-    console.log(`Account pressed: ${account.firstName} ${account.lastName}`);
     // This could be implemented later when needed
   };
 
@@ -144,11 +172,16 @@ const ManagedAccountsListScreen: React.FC = () => {
     // Calculate delay for staggered animation
     const animationDelay = 150 * index;
     
-    // Générer un nom d'utilisateur si non présent dans l'API
-    const username = `${item.firstName.toLowerCase()}${item.lastName.toLowerCase()}`;
+    // Générer un nom d'utilisateur si non présent dans l'API en utilisant la fonction sécurisée
+    const username = safeUsername(item);
     
+    // Ensure we have safe values for the image URL
+    const safeName = item?.firstName || 'User';
+    const safeId = item?.id || '0';
+
     return (
       <Animated.View
+        key={`animated-account-${item.id || index}`}
         style={{
           opacity: fadeAnim,
           transform: [{ translateY: Animated.multiply(slideAnim, new Animated.Value(index + 1)) }]
@@ -167,7 +200,10 @@ const ManagedAccountsListScreen: React.FC = () => {
             isSmallDevice && styles.avatarContainerSmall
           ]}>
             <Image 
-              source={{ uri: item.avatarUrl || `https://api.a0.dev/assets/image?text=${encodeURIComponent(item.firstName)}&aspect=1:1&seed=${item.id}` }} 
+              source={{ 
+                uri: item.avatarUrl || 
+                     `https://api.a0.dev/assets/image?text=${encodeURIComponent(safeName)}&aspect=1:1&seed=${safeId}` 
+              }} 
               style={styles.avatar}
               resizeMode="cover" 
             />
@@ -181,7 +217,7 @@ const ManagedAccountsListScreen: React.FC = () => {
               numberOfLines={1}
               ellipsizeMode="tail"
             >
-              {`${item.firstName} ${item.lastName}`}
+              {`${item.firstName || ''} ${item.lastName || ''}`}
             </Text>
             <Text 
               style={[
@@ -191,7 +227,7 @@ const ManagedAccountsListScreen: React.FC = () => {
               numberOfLines={1}
               ellipsizeMode="tail"
             >
-              {username}
+              {item.username || username}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={isSmallDevice ? 20 : 24} color="#CCCCCC" />
@@ -202,6 +238,7 @@ const ManagedAccountsListScreen: React.FC = () => {
 
   const renderCreateNewButton = () => (
     <Animated.View
+      key="create-new-button-container"
       style={{
         opacity: fadeAnim,
         transform: [{ translateY: Animated.multiply(slideAnim, new Animated.Value(displayAccounts.length + 1)) }]
@@ -292,17 +329,19 @@ const ManagedAccountsListScreen: React.FC = () => {
               }}
             >
               {displayAccounts.map((account, index) => (
-                <React.Fragment key={account.id}>
+                <View key={`account-item-${account.id || index}`}>
                   {renderAccountItem({ item: account, index })}
-                </React.Fragment>
+                </View>
               ))}
               {renderCreateNewButton()}
               
               {/* Bottom padding to ensure the button doesn't overlap content */}
-              <View style={[
-                styles.bottomPadding, 
-                { height: isSmallDevice ? 60 : 80 }
-              ]} />
+              <View 
+                style={[
+                  styles.bottomPadding, 
+                  { height: isSmallDevice ? 60 : 80 }
+                ]} 
+              />
             </ScrollView>
           )}
         </View>
@@ -334,7 +373,7 @@ const ManagedAccountsListScreen: React.FC = () => {
               styles.finishButtonText,
               isSmallDevice && styles.finishButtonTextSmall
             ]}>
-              Cela me semble parfait !
+              {fromSettings ? "Valider" : "Cela me semble parfait !"}
             </Text>
           </TouchableOpacity>
         </Animated.View>

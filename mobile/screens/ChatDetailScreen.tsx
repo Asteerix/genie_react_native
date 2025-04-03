@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,9 @@ import { Ionicons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-ico
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
+import { useMessaging } from '../context/MessagingContext';
+import { MessageResponse } from '../api/messages';
+import { useAuth } from '../auth/context/AuthContext';
 
 type ChatDetailRouteProp = RouteProp<RootStackParamList, 'ChatDetail'>;
 
@@ -32,165 +35,197 @@ interface Message {
   timestamp: string;
   status: 'sent' | 'delivered' | 'read';
   isOwn: boolean;
+  type?: string;
+  mediaUrl?: string;
 }
 
 const ChatDetailScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<ChatDetailRouteProp>();
-  const { messageId, name, avatars, isGroupChat } = route.params;
+  const { messageId: chatId, name, avatars, isGroupChat } = route.params;
+  const { user } = useAuth();
+  const { 
+    loadMessages, 
+    sendMessage, 
+    messages: allMessages, 
+    markMessageRead,
+    sendTypingNotification,
+    subscribeToChat,
+    unsubscribeFromChat,
+    isUserTyping
+  } = useMessaging();
 
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [otherUserTyping, setOtherUserTyping] = useState('');
+  const [participants, setParticipants] = useState<{id: string; name: string; avatar: string}[]>([]);
   
   const flatListRef = useRef<FlatList>(null);
   const inputHeight = useRef(new Animated.Value(50)).current;
   const emojiPickerHeight = useRef(new Animated.Value(0)).current;
+  const typingTimeout = useRef<NodeJS.Timeout | null>(null);
   
-  // Mock users for random message generation
-  const users = [
-    {
-      id: 'me',
-      name: 'Moi',
-      avatar: 'https://api.a0.dev/assets/image?text=avatar%20profile%20portrait&aspect=1:1',
-    },
-    {
-      id: 'user1',
-      name: name.split(',')[0],
-      avatar: avatars[0],
-    }
-  ];
-  
-  if (isGroupChat && avatars.length > 1) {
-    users.push({
-      id: 'user2',
-      name: name.split(',')[1],
-      avatar: avatars[1],
-    });
-  }
-
+  // Setup participants from route params
   useEffect(() => {
-    // Mock data loading and initial message generation
-    const loadMessages = async () => {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Generate mock messages
-      const mockMessages: Message[] = [];
-      
-      // Today's date at 9:30 AM
-      const today = new Date();
-      today.setHours(9, 30, 0, 0);
-      
-      // Add system message about the group creation (for group chats only)
-      if (isGroupChat) {
-        mockMessages.push({
-          id: 'system-1',
-          text: `Vous avez créé ce groupe`,
-          sender: {
-            id: 'system',
-            name: 'Système',
-            avatar: '',
-          },
-          timestamp: today.toISOString(),
-          status: 'read',
-          isOwn: false,
-        });
-      }
-      
-      // Add some previous messages
-      for (let i = 0; i < 15; i++) {
-        const minutesAgo = Math.floor(Math.random() * 60);
-        const messageTime = new Date(today);
-        messageTime.setMinutes(messageTime.getMinutes() + (i * 10) + minutesAgo);
-        
-        const isOwnMessage = Math.random() > 0.5;
-        const sender = isOwnMessage ? users[0] : users[Math.floor(Math.random() * (users.length - 1)) + 1];
-        
-        mockMessages.push({
-          id: `msg-${i}`,
-          text: getRandomMessage(isOwnMessage, isGroupChat),
-          sender: sender,
-          timestamp: messageTime.toISOString(),
-          status: isOwnMessage ? (Math.random() > 0.3 ? 'read' : 'delivered') : 'sent',
-          isOwn: isOwnMessage,
-        });
-      }
-      
-      // Sort messages by timestamp
-      mockMessages.sort((a, b) => 
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      );
-      
-      setMessages(mockMessages);
-      setIsLoading(false);
+    // Default current user
+    const currentUser = {
+      id: user?.id || 'me',
+      name: 'Moi',
+      avatar: user?.avatarUrl || 'https://api.a0.dev/assets/image?text=avatar%20profile%20portrait&aspect=1:1',
     };
     
-    loadMessages();
-  }, [messageId, isGroupChat]);
-  
+    // Setup other participants based on avatars from route params
+    const otherParticipants = avatars.map((avatar, index) => ({
+      id: `user${index+1}`,
+      name: isGroupChat ? name.split(',')[index] || `User ${index+1}` : name,
+      avatar
+    }));
+    
+    setParticipants([currentUser, ...otherParticipants]);
+  }, [name, avatars, isGroupChat, user]);
+
+  // Subscribe to chat and load messages
   useEffect(() => {
-    // Scroll to bottom when messages change
-    if (messages.length > 0 && !isLoading) {
+    const initializeChat = async () => {
+      setIsLoading(true);
+      
+      try {
+        // Subscribe to chat for real-time updates
+        subscribeToChat(chatId);
+        
+        // Load messages
+        await loadMessages(chatId);
+        
+        // Add a small delay for UI smoothness
+        setTimeout(() => {
+          setIsLoading(false);
+        }, 500);
+      } catch (error) {
+        console.error('Error initializing chat:', error);
+        setIsLoading(false);
+      }
+    };
+    
+    initializeChat();
+    
+    // Cleanup: unsubscribe from chat
+    return () => {
+      unsubscribeFromChat(chatId);
+    };
+  }, [chatId]);
+  
+  // Convert API messages to local format and handle real-time updates
+  useEffect(() => {
+    const chatMessages = allMessages[chatId] || [];
+    
+    if (chatMessages.length > 0) {
+      // Convert API messages to local format
+      const formattedMessages = chatMessages.map(msg => {
+        const sender = msg.senderId === user?.id 
+          ? participants[0] // Current user
+          : participants.find(p => p.id === msg.senderId) || {
+              id: msg.senderId,
+              name: 'Unknown',
+              avatar: 'https://api.a0.dev/assets/image?text=user%20avatar&aspect=1:1'
+            };
+        
+        // Mark message as read
+        if (msg.senderId !== user?.id && !msg.readBy.includes(user?.id || '')) {
+          markMessageRead(msg.id);
+        }
+        
+        return {
+          id: msg.id,
+          text: msg.content,
+          sender: sender,
+          timestamp: msg.createdAt,
+          status: msg.status,
+          isOwn: msg.senderId === user?.id,
+          type: msg.type,
+          mediaUrl: msg.mediaUrl
+        };
+      });
+      
+      setLocalMessages(formattedMessages);
+    }
+  }, [allMessages, chatId, user?.id]);
+  
+  // Check for typing indicators
+  useEffect(() => {
+    // Find any participant who is typing
+    const typingParticipant = participants.find(p => 
+      p.id !== user?.id && isUserTyping(chatId, p.id)
+    );
+    
+    if (typingParticipant) {
+      setOtherUserTyping(typingParticipant.name);
+    } else {
+      setOtherUserTyping('');
+    }
+  }, [participants, chatId, user?.id, isUserTyping]);
+  
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    if (localMessages.length > 0 && !isLoading) {
       setTimeout(() => {
         if (flatListRef.current) {
           flatListRef.current.scrollToEnd({ animated: true });
         }
       }, 200);
     }
-  }, [messages, isLoading]);
+  }, [localMessages, isLoading]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (text.trim() === '') return;
     
-    const newMessage: Message = {
-      id: `msg-${Date.now()}`,
-      text: text.trim(),
-      sender: users[0],
-      timestamp: new Date().toISOString(),
-      status: 'sent',
-      isOwn: true,
-    };
-    
-    setMessages([...messages, newMessage]);
+    const messageText = text.trim();
     setText('');
     
-    // Simulate received message after a delay (for demo purposes)
-    setTimeout(() => {
-      // Set "typing" status
+    // Send the message to the server
+    const result = await sendMessage(chatId, messageText);
+    
+    // Note: We don't need to update local messages here as they will be updated
+    // via the WebSocket or the context when the message is confirmed
+  };
+  
+  // Send typing notification when user is typing
+  const handleInputChange = (newText: string) => {
+    setText(newText);
+    
+    // Send typing notification
+    if (newText.length > 0 && (!typingTimeout.current || !isTyping)) {
+      sendTypingNotification(chatId);
       setIsTyping(true);
       
-      // After a random delay, send a response
-      const replyDelay = 1000 + Math.random() * 2000;
-      setTimeout(() => {
+      // Clear previous timeout
+      if (typingTimeout.current) {
+        clearTimeout(typingTimeout.current);
+      }
+      
+      // Set new timeout to clear typing status
+      typingTimeout.current = setTimeout(() => {
         setIsTyping(false);
-        
-        const sender = users[Math.floor(Math.random() * (users.length - 1)) + 1];
-        const replyMessage: Message = {
-          id: `msg-${Date.now()}`,
-          text: getRandomReply(),
-          sender: sender,
-          timestamp: new Date().toISOString(),
-          status: 'sent',
-          isOwn: false,
-        };
-        
-        setMessages(prev => [...prev, replyMessage]);
-        
-        // Update previous message status
-        setTimeout(() => {
-          setMessages(prev => 
-            prev.map(msg => 
-              msg.id === newMessage.id 
-                ? { ...msg, status: 'read' } 
-                : msg
-            )
-          );
-        }, 1000);
-      }, replyDelay);
-    }, 500);
+        typingTimeout.current = null;
+      }, 3000);
+    }
+    
+    // Auto-expand input for multiline text
+    if (newText.length > 40 && newText.includes(' ')) {
+      Animated.timing(inputHeight, {
+        toValue: 80,
+        duration: 100,
+        useNativeDriver: false,
+      }).start();
+    } else if (newText.length < 30) {
+      Animated.timing(inputHeight, {
+        toValue: 50,
+        duration: 100,
+        useNativeDriver: false,
+      }).start();
+    }
   };
 
   const handleBackPress = () => {
@@ -233,25 +268,6 @@ const ChatDetailScreen = () => {
     }
   };
 
-  const handleInputChange = (newText: string) => {
-    setText(newText);
-    
-    // Auto-expand input for multiline text
-    if (newText.length > 40 && newText.includes(' ')) {
-      Animated.timing(inputHeight, {
-        toValue: 80,
-        duration: 100,
-        useNativeDriver: false,
-      }).start();
-    } else if (newText.length < 30) {
-      Animated.timing(inputHeight, {
-        toValue: 50,
-        duration: 100,
-        useNativeDriver: false,
-      }).start();
-    }
-  };
-
   const addEmoji = (emoji: string) => {
     setText(prev => prev + emoji);
   };
@@ -286,8 +302,8 @@ const ChatDetailScreen = () => {
         
         <View>
           <Text style={styles.headerName}>{name}</Text>
-          {isTyping ? (
-            <Text style={styles.typingIndicator}>En train d'écrire...</Text>
+          {otherUserTyping ? (
+            <Text style={styles.typingIndicator}>{otherUserTyping} est en train d'écrire...</Text>
           ) : (
             <Text style={styles.headerStatus}>
               {isGroupChat ? `${avatars.length} participants` : 'En ligne'}
@@ -416,7 +432,7 @@ const ChatDetailScreen = () => {
         ) : (
           <FlatList
             ref={flatListRef}
-            data={messages}
+            data={localMessages}
             renderItem={renderMessage}
             keyExtractor={item => item.id}
             contentContainerStyle={styles.messagesList}
@@ -424,6 +440,11 @@ const ChatDetailScreen = () => {
             initialNumToRender={20}
             maxToRenderPerBatch={10}
             ListHeaderComponent={() => renderDateSeparator("Aujourd'hui")}
+            ListEmptyComponent={() => (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>Aucun message. Commencez la conversation !</Text>
+              </View>
+            )}
           />
         )}
         

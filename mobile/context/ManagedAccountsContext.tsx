@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { 
   createManagedAccount, 
   getManagedAccounts,
@@ -97,8 +98,53 @@ export const ManagedAccountsProvider: React.FC<{ children: React.ReactNode }> = 
   useEffect(() => {
     if (user) {
       fetchAccounts();
+    } else {
+      // Si pas d'utilisateur, réinitialiser les données
+      setAccounts([]);
+      setCurrentAccount(null);
+      setFormData({
+        firstName: '',
+        lastName: '',
+        gender: '',
+        birthDate: '',
+        avatarUrl: '',
+      });
     }
   }, [user]);
+  
+  // Vérifier régulièrement si l'authentification reste valide
+  useEffect(() => {
+    const checkAuthStatus = async () => {
+      try {
+        const [accessToken, refreshToken] = await Promise.all([
+          AsyncStorage.getItem('accessToken'),
+          AsyncStorage.getItem('refreshToken')
+        ]);
+        
+        // Si aucun token n'existe mais que nous avons des comptes chargés, nettoyer
+        if (!accessToken && !refreshToken && accounts.length > 0) {
+          console.log('Tokens absents mais comptes présents, nettoyage du ManagedAccountsContext');
+          setAccounts([]);
+          setCurrentAccount(null);
+          setFormData({
+            firstName: '',
+            lastName: '',
+            gender: '',
+            birthDate: '',
+            avatarUrl: '',
+          });
+        }
+      } catch (error) {
+        console.error('Erreur lors de la vérification des tokens:', error);
+      }
+    };
+    
+    // Vérifier au démarrage et périodiquement
+    checkAuthStatus();
+    const interval = setInterval(checkAuthStatus, 5000);
+    
+    return () => clearInterval(interval);
+  }, [accounts.length]);
   
   // Définir un champ du formulaire
   const setFormField = useCallback((field: keyof ManagedAccountCreateRequest, value: string) => {
@@ -121,24 +167,60 @@ export const ManagedAccountsProvider: React.FC<{ children: React.ReactNode }> = 
   
   // Récupérer tous les comptes gérés
   const fetchAccounts = useCallback(async () => {
+    // Vérifier si l'utilisateur est connecté avant de faire la requête
+    if (!user) {
+      // Silencieux - pas d'utilisateur connecté
+      setAccounts([]); // Réinitialiser les comptes
+      return;
+    }
+    
     setIsLoading(true);
     setError(null);
     
     try {
+      // Récupération silencieuse des comptes gérés
+      
+      // État de la session pour debug
+      // Vérification silencieuse des tokens - pas de logs
+      
       const response = await getManagedAccounts();
       
       if (response.error) {
-        setError(response.error);
+        // Gestion silencieuse des erreurs
+        // Si erreur 401 non autorisé, ne pas afficher d'erreur à l'utilisateur
+        if (response.error.includes('401') || response.error.includes('non autorisé')) {
+          // Silencieux - ne pas logguer d'erreur pour les problèmes d'authentification
+          setAccounts([]); // Réinitialiser les comptes
+        } else {
+          setError(response.error);
+        }
       } else if (response.data) {
+        // Comptes gérés récupérés avec succès - pas de log
         setAccounts(response.data); // La réponse est déjà un tableau de ManagedAccount
+      } else {
+        // Aucune donnée retournée mais pas d'erreur explicite
+        // Aucun compte disponible - pas de log
+        setAccounts([]);
       }
     } catch (err) {
-      console.error('Erreur lors de la récupération des comptes gérés:', err);
-      setError('Une erreur est survenue lors de la récupération des comptes gérés');
+      // Erreur silencieuse lors de la récupération des comptes gérés
+      
+      // Ne pas afficher d'erreur à l'utilisateur en cas d'erreur d'authentification
+      if (err.message && (
+          err.message.includes('401') || 
+          err.message.includes('non autorisé') || 
+          err.message.includes('unauthorized') ||
+          err.__handled // Marquer comme traité par l'intercepteur d'API
+        )) {
+        // Erreur d'authentification silencieuse - pas de log
+        setAccounts([]); // Réinitialiser les comptes
+      } else {
+        setError('Une erreur est survenue lors de la récupération des comptes gérés');
+      }
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [user]);
   
   // Récupérer un compte géré spécifique
   const fetchAccount = useCallback(async (accountId: string) => {
@@ -163,7 +245,7 @@ export const ManagedAccountsProvider: React.FC<{ children: React.ReactNode }> = 
         });
       }
     } catch (err) {
-      console.error(`Erreur lors de la récupération du compte géré ${accountId}:`, err);
+      // Erreur silencieuse
       setError('Une erreur est survenue lors de la récupération du compte géré');
     } finally {
       setIsLoading(false);
@@ -189,7 +271,7 @@ export const ManagedAccountsProvider: React.FC<{ children: React.ReactNode }> = 
       
       return null;
     } catch (err) {
-      console.error('Erreur lors de la création du compte géré:', err);
+      // Erreur silencieuse
       setError('Une erreur est survenue lors de la création du compte géré');
       return null;
     } finally {
@@ -222,7 +304,7 @@ export const ManagedAccountsProvider: React.FC<{ children: React.ReactNode }> = 
       
       return null;
     } catch (err) {
-      console.error(`Erreur lors de la mise à jour du compte géré ${accountId}:`, err);
+      // Erreur silencieuse
       setError('Une erreur est survenue lors de la mise à jour du compte géré');
       return null;
     } finally {
@@ -253,7 +335,7 @@ export const ManagedAccountsProvider: React.FC<{ children: React.ReactNode }> = 
         return true;
       }
     } catch (err) {
-      console.error(`Erreur lors de la suppression du compte géré ${accountId}:`, err);
+      // Erreur silencieuse
       setError('Une erreur est survenue lors de la suppression du compte géré');
       return false;
     } finally {
@@ -287,7 +369,7 @@ export const ManagedAccountsProvider: React.FC<{ children: React.ReactNode }> = 
         return true;
       }
     } catch (err) {
-      console.error(`Erreur lors de la mise à jour de l'avatar du compte géré ${accountId}:`, err);
+      // Erreur silencieuse
       setError('Une erreur est survenue lors de la mise à jour de l\'avatar');
       return false;
     } finally {

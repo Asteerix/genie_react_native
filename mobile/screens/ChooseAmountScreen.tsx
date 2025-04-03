@@ -74,11 +74,14 @@ const ChooseAmountScreen = () => {
       return false;
     }
     
-    const availableBalance = activeProfile?.balance || 0;
-    
-    if (numericAmount > availableBalance) {
-      setError(`Le montant dépasse votre solde disponible (${availableBalance} €).`);
-      return false;
+    // Vérifier le solde uniquement si on fait un transfert (pas quand on ajoute des fonds)
+    if (!isAddingFunds) {
+      const availableBalance = activeProfile?.balance || 0;
+      
+      if (numericAmount > availableBalance) {
+        setError(`Le montant dépasse votre solde disponible (${availableBalance} €).`);
+        return false;
+      }
     }
     
     return true;
@@ -88,30 +91,73 @@ const ChooseAmountScreen = () => {
   const handleTransfer = () => {
     if (!isValidAmount()) return;
     
-    // Afficher une confirmation
+    // Nous récupérons les fonctions du contexte à l'avance (en respectant les règles des hooks)
+    const { addFunds } = useProfile();
+    
+    // Afficher une confirmation avec un message approprié
     Alert.alert(
-      "Confirmer le transfert",
-      `Voulez-vous vraiment transférer ${amount} € vers ${user?.name || 'ce destinataire'} ?`,
+      isAddingFunds ? "Confirmer l'ajout" : "Confirmer le transfert",
+      isAddingFunds 
+        ? `Voulez-vous vraiment ajouter ${amount} € à votre compte ?`
+        : `Voulez-vous vraiment transférer ${amount} € vers ${user?.name || 'ce destinataire'} ?`,
       [
         { text: "Annuler", style: "cancel" },
         { 
           text: "Confirmer", 
-          onPress: () => {
-            // En production, vous enverriez une requête à une API
-            // Pour l'instant, on simule un transfert réussi
-            setTimeout(() => {
+          onPress: async () => {
+            try {
+              // Convertir le montant en nombre
+              const numericAmount = parseFloat(amount);
+              
+              if (isAddingFunds) {
+                // Si on ajoute des fonds (par exemple depuis une source externe)
+                
+                // Simulation d'une attente réseau
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Ajouter les fonds au portefeuille (avec la fonction récupérée à l'avance)
+                const result = await addFunds(numericAmount);
+                
+                if (result) {
+                  Alert.alert(
+                    "Fonds ajoutés",
+                    `${amount} € ont été ajoutés à votre compte avec succès.`,
+                    [{ 
+                      text: "OK", 
+                      onPress: () => navigation.goBack() // Juste fermer l'écran actuel
+                    }]
+                  );
+                } else {
+                  Alert.alert(
+                    "Erreur",
+                    "Une erreur est survenue lors de l'ajout des fonds. Veuillez réessayer."
+                  );
+                }
+              } else if (user) {
+                // Si on envoie de l'argent à un utilisateur/compte
+                // Ici on pourrait appeler une API pour effectuer un transfert
+                // Par exemple:
+                // await API.transferToUser(user.id, numericAmount);
+                
+                // Simulation d'une attente réseau
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                Alert.alert(
+                  "Transfert effectué",
+                  `Votre transfert de ${amount} € a été effectué avec succès.`,
+                  [{ 
+                    text: "OK", 
+                    onPress: () => navigation.navigate('Profile')
+                  }]
+                );
+              }
+            } catch (error) {
+              console.error("Erreur lors de l'opération:", error);
               Alert.alert(
-                "Transfert effectué",
-                `Votre transfert de ${amount} € a été effectué avec succès.`,
-                [{ 
-                  text: "OK", 
-                  onPress: () => {
-                    // Retourner à l'écran du profil après le transfert
-                    navigation.navigate('Profile');
-                  }
-                }]
+                "Erreur",
+                "Une erreur est survenue. Veuillez réessayer ou contacter le support."
               );
-            }, 1000);
+            }
           }
         }
       ]
@@ -132,7 +178,7 @@ const ChooseAmountScreen = () => {
           >
             <Ionicons name="close" size={28} color="black" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Choisir un montant</Text>
+          <Text style={styles.headerTitle}>{isAddingFunds ? "Ajouter des fonds" : "Choisir un montant"}</Text>
         </View>
         
         <ScrollView style={styles.content}>
@@ -199,7 +245,7 @@ const ChooseAmountScreen = () => {
             disabled={!amount || parseFloat(amount) <= 0}
           >
             <Ionicons name="arrow-forward" size={24} color="white" style={styles.sendIcon} />
-            <Text style={styles.sendButtonText}>Envoyer</Text>
+            <Text style={styles.sendButtonText}>{isAddingFunds ? "Ajouter" : "Envoyer"}</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>

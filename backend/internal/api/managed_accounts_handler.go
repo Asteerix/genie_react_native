@@ -3,9 +3,9 @@ package api
 import (
 	"net/http"
 
-	"github.com/asteerix/auth-backend/internal/accounts"
-	"github.com/asteerix/auth-backend/internal/middleware"
-	"github.com/asteerix/auth-backend/internal/models"
+	"genie/internal/accounts"
+	"genie/internal/middleware"
+	"genie/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 )
@@ -23,17 +23,15 @@ func NewManagedAccountsHandler(accountsService *accounts.Service) *ManagedAccoun
 }
 
 // RegisterRoutes enregistre les routes pour les comptes gérés
-func (h *ManagedAccountsHandler) RegisterRoutes(router *gin.Engine, authMiddleware gin.HandlerFunc) {
-	managedAccounts := router.Group("/api/v1/managed-accounts")
-	managedAccounts.Use(authMiddleware)
+func (h *ManagedAccountsHandler) RegisterRoutes(router *gin.RouterGroup) {
 	{
-		managedAccounts.POST("", h.createManagedAccount)
-		managedAccounts.GET("", h.getManagedAccounts)
-		managedAccounts.GET("/:accountId", h.getManagedAccount)
-		managedAccounts.PUT("/:accountId", h.updateManagedAccount)
-		managedAccounts.DELETE("/:accountId", h.deleteManagedAccount)
-		managedAccounts.PUT("/:accountId/avatar", h.updateManagedAccountAvatar)
-		managedAccounts.PUT("/:accountId/profile-picture", h.updateManagedAccountProfilePicture)
+		router.POST("", h.createManagedAccount)
+		router.GET("", h.getManagedAccounts)
+		router.GET("/:accountId", h.getManagedAccount)
+		router.PUT("/:accountId", h.updateManagedAccount)
+		router.DELETE("/:accountId", h.deleteManagedAccount)
+		router.PUT("/:accountId/avatar", h.updateManagedAccountAvatar)
+		router.PUT("/:accountId/profile-picture", h.updateManagedAccountProfilePicture)
 	}
 }
 
