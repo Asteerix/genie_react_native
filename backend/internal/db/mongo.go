@@ -66,6 +66,7 @@ func Connect(cfg config.MongoDBConfig) (*Database, error) {
 	defer cancel()
 
 	// Préparer les options de connexion
+	log.Info().Str("mongo_uri", cfg.URI).Msg("Tentative de connexion à MongoDB avec cette URI") // Log added for debugging
 	clientOptions := options.Client().ApplyURI(cfg.URI)
 	
 	// Ajouter l'authentification si fournie
