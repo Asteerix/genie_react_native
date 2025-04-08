@@ -425,7 +425,7 @@ func (sm *ScraperManager) UpdateCache() {
 			scraper = &GenericScraper{
 				BrandID:      brandID,
 				BrandName:    brandName,
-				CanopyClient: NewCanopyClient("2ea2fa43-aec8-4963-8c08-1b51191e81f8"),
+				CanopyClient: NewCanopyClient("d4ae64c9-bbb5-4814-9522-9e51d3d7c95b"), // TODO: Move API key to env var
 			}
 			sm.scrapers[brandID] = scraper
 			log.Info().
