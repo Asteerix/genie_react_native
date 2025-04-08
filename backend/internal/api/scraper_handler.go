@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -506,7 +507,7 @@ func (h *ScraperHandler) GetFilterBrands(c *gin.Context) {
 	}
 
 	// Lire directement le fichier JSON pour plus de performance
-	cacheFilePath := "./cache/products_cache.json"
+	cacheFilePath := filepath.Join("./cache", "products_cache.json") // Utiliser filepath.Join pour la cohérence et la portabilité
 	data, err := os.ReadFile(cacheFilePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur lors de la lecture du fichier de cache"})
