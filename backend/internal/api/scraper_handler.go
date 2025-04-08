@@ -135,54 +135,56 @@ func (h *ScraperHandler) GetCachedInspirations(c *gin.Context) {
 	c.JSON(http.StatusOK, inspirationsList)
 }
 
-// GetAllBrands récupère toutes les marques disponibles
+// GetAllBrands récupère toutes les marques disponibles ayant des produits dans le cache
 func (h *ScraperHandler) GetAllBrands(c *gin.Context) {
-	// Lire directement le fichier JSON
-	cacheFilePath := "./cache/products_cache.json"
-	data, err := os.ReadFile(cacheFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Warn().Str("path", cacheFilePath).Msg("Fichier cache produits non trouvé pour GetAllBrands, retour d'une liste vide.")
-			c.JSON(http.StatusOK, []map[string]string{}) // Retourne une liste vide si le fichier n'existe pas
-			return
-		}
-		log.Error().Err(err).Str("path", cacheFilePath).Msg("Erreur lors de la lecture du fichier de cache pour GetAllBrands")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur lors de la lecture du fichier de cache"})
-		return
-	}
-
-	// Structure pour décoder le cache
-	var cacheData struct {
-		LastUpdated string                       `json:"lastUpdated"`
-		Products    map[string][]scraper.Product `json:"products"`
-	}
-
-	// Décoder le JSON
-	if err := json.Unmarshal(data, &cacheData); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur lors du décodage du cache"})
-		return
-	}
-
-	// Récupérer les détails des marques qui ont au moins un produit
 	var brandDetails []map[string]string
+	processedBrands := make(map[string]bool) // Pour éviter les doublons si une marque est dans plusieurs catégories
 
-	// Parcourir les marques dans le cache
-	for brandID, products := range cacheData.Products {
-		if len(products) > 0 {
-			// Convertir l'ID de la marque en nom d'affichage
+	// Parcourir toutes les catégories de marques définies
+	for _, brandsInCategory := range brandCategories {
+		for _, brandID := range brandsInCategory {
+			if processedBrands[brandID] {
+				continue // Marque déjà traitée
+			}
+			// Vérifier si la marque a des produits dans le cache via le ScraperManager
+			products, exists := h.scraperManager.GetCachedProducts(brandID)
+			if exists && len(products) > 0 {
+				brandName := convertBrandIDToName(brandID)
+				logoURL := getBrandLogoURL(brandID)
+				brandDetails = append(brandDetails, map[string]string{
+					"id":   brandID,
+					"name": brandName,
+					"logo": logoURL,
+				})
+				processedBrands[brandID] = true
+			}
+		}
+	}
+
+	// Ajouter également les marques génériques si elles ont des produits
+	for brandID := range genericBrands {
+		if processedBrands[brandID] {
+			continue
+		}
+		products, exists := h.scraperManager.GetCachedProducts(brandID)
+		if exists && len(products) > 0 {
 			brandName := convertBrandIDToName(brandID)
-
-			// Construire l'URL du logo
 			logoURL := getBrandLogoURL(brandID)
-
 			brandDetails = append(brandDetails, map[string]string{
 				"id":   brandID,
 				"name": brandName,
 				"logo": logoURL,
 			})
+			processedBrands[brandID] = true
 		}
 	}
 
+	// Trier les marques par nom pour une réponse cohérente
+	sort.Slice(brandDetails, func(i, j int) bool {
+		return brandDetails[i]["name"] < brandDetails[j]["name"]
+	})
+
+	log.Info().Int("count", len(brandDetails)).Msg("Marques actives récupérées depuis le cache via ScraperManager")
 	c.JSON(http.StatusOK, brandDetails)
 }
 
@@ -386,65 +388,42 @@ func (h *ScraperHandler) GetInspirationProductArticles(c *gin.Context) {
 	c.JSON(http.StatusOK, articles)
 }
 
-// GetFilters récupère les filtres qui ont des marques avec des produits
+// GetFilters récupère les filtres qui ont des marques avec des produits dans le cache
 func (h *ScraperHandler) GetFilters(c *gin.Context) {
-	// Lire le cache des produits
-	cacheFilePath := "./cache/products_cache.json"
-	data, err := os.ReadFile(cacheFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Warn().Str("path", cacheFilePath).Msg("Fichier cache produits non trouvé pour GetFilters, retour d'une liste vide.")
-			c.JSON(http.StatusOK, []map[string]interface{}{}) // Retourne une liste vide si le fichier n'existe pas
-			return
-		}
-		log.Error().Err(err).Str("path", cacheFilePath).Msg("Erreur lors de la lecture du fichier de cache pour GetFilters")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur lors de la lecture du cache"})
-		return
-	}
-
-	// Décoder le cache
-	var cacheData struct {
-		LastUpdated string                       `json:"lastUpdated"`
-		Products    map[string][]scraper.Product `json:"products"`
-	}
-	if err := json.Unmarshal(data, &cacheData); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur lors du décodage du cache"})
-		return
-	}
-
-	// Préparer tous les filtres possibles avec leurs noms d'affichage
-	var allFilters []map[string]interface{}
-	for filterID, displayName := range filterNames {
-		allFilters = append(allFilters, map[string]interface{}{
-			"id":   filterID,
-			"name": displayName,
-		})
-	}
-
-	// Filtrer les catégories qui ont des marques avec des produits
 	var activeFilters []map[string]interface{}
-	for _, filter := range allFilters {
-		filterID := filter["id"].(string)
-		// Vérifier si des marques de cette catégorie ont des produits
-		hasBrandsWithProducts := false
 
-		// Vérifier chaque marque dans la catégorie
-		for brandID := range cacheData.Products {
-			if len(cacheData.Products[brandID]) > 0 {
-				// Vérifier si la marque appartient à cette catégorie
-				brands, exists := brandCategories[filterID]
-				if exists && contains(brands, brandID) {
+	// Parcourir tous les filtres définis
+	for filterID, displayName := range filterNames {
+		// Vérifier si au moins une marque de ce filtre a des produits dans le cache
+		hasBrandsWithProducts := false
+		brandsInFilter, filterExists := brandCategories[filterID]
+
+		if filterExists {
+			for _, brandID := range brandsInFilter {
+				// Utiliser GetCachedProducts pour vérifier l'existence et le contenu
+				products, exists := h.scraperManager.GetCachedProducts(brandID)
+				if exists && len(products) > 0 {
 					hasBrandsWithProducts = true
-					break
+					break // Pas besoin de vérifier les autres marques de ce filtre
 				}
 			}
 		}
 
+		// Si le filtre a des marques avec des produits, l'ajouter à la liste active
 		if hasBrandsWithProducts {
-			activeFilters = append(activeFilters, filter)
+			activeFilters = append(activeFilters, map[string]interface{}{
+				"id":   filterID,
+				"name": displayName,
+			})
 		}
 	}
 
+	// Trier les filtres par nom pour une réponse cohérente
+	sort.Slice(activeFilters, func(i, j int) bool {
+		return activeFilters[i]["name"].(string) < activeFilters[j]["name"].(string)
+	})
+
+	log.Info().Int("count", len(activeFilters)).Msg("Filtres actifs récupérés depuis le cache via ScraperManager")
 	c.JSON(http.StatusOK, activeFilters)
 }
 
