@@ -1,0 +1,67 @@
+# Global rules
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /private/
+Disallow: /temp/
+Disallow: /*?*
+Clean-param: utm_source&utm_medium&utm_campaign&utm_content&utm_term
+Crawl-delay: 5
+
+# Sitemap declarations
+Sitemap: https://genie-app.com/sitemap.xml
+Sitemap: https://genie-app.com/fr/sitemap.xml
+Sitemap: https://genie-app.com/en/sitemap.xml
+
+# Google specific rules
+User-agent: Googlebot
+Allow: /
+Allow: /*.js
+Allow: /*.css
+Allow: /*.png
+Allow: /*.jpg
+Allow: /*.gif
+Allow: /*.svg
+Allow: /*.webp
+Allow: /*.avif
+Disallow: /*?*
+
+# Bing specific rules
+User-agent: Bingbot
+Allow: /
+Allow: /*.js
+Allow: /*.css
+Allow: /*.png
+Allow: /*.jpg
+Allow: /*.gif
+Allow: /*.svg
+Allow: /*.webp
+Allow: /*.avif
+Disallow: /*?*
+
+# Image crawlers
+User-agent: Googlebot-Image
+Allow: /*.jpg
+Allow: /*.jpeg
+Allow: /*.gif
+Allow: /*.png
+Allow: /*.webp
+Allow: /*.avif
+Allow: /*.svg
+Disallow: /assets/images/avatars/
+
+# Social Media Bots
+User-agent: Twitterbot
+Allow: /
+Allow: /*.png
+Allow: /*.jpg
+Allow: /*.gif
+Allow: /*.svg
+
+User-agent: facebookexternalhit
+Allow: /
+Allow: /*.png
+Allow: /*.jpg
+Allow: /*.gif
+Allow: /*.svg
