@@ -19,7 +19,7 @@ async function getExampleData(data = {}) {
     mode: "cors",
     headers: {
       "Content-Type": "application/json",
-      "API-KEY": "2ea2fa43-aec8-4963-8c08-1b51191e81f8"
+      "API-KEY": "d4ae64c9-bbb5-4814-9522-9e51d3d7c95b"
     },
     body: JSON.stringify(data) // body data type must match "Content-Type" header
   });

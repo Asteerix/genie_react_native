@@ -1631,7 +1631,7 @@ func (sm *ScraperManager) GetProductsByInspiration(inspiration string) ([]Produc
 // getFallbackProducts récupère des produits génériques pour une marque
 func (sm *ScraperManager) getFallbackProducts(brandID string) ([]Product, error) {
 	// Créer un client Canopy pour récupérer des produits
-	canopyClient := NewCanopyClient("2ea2fa43-aec8-4963-8c08-1b51191e81f8")
+	canopyClient := NewCanopyClient("d4ae64c9-bbb5-4814-9522-9e51d3d7c95b")
 
 	// Utiliser le nom de la marque comme mot-clé de recherche
 	brandName := strings.ToUpper(brandID[:1]) + brandID[1:]
@@ -1685,7 +1685,7 @@ func (sm *ScraperManager) getFallbackProducts(brandID string) ([]Product, error)
 // Cette fonction est maintenue pour compatibilité mais n'est plus utilisée directement
 func (sm *ScraperManager) getFallbackNewProducts(brandID string) ([]Product, error) {
 	// Créer un client Canopy pour récupérer des produits
-	canopyClient := NewCanopyClient("2ea2fa43-aec8-4963-8c08-1b51191e81f8")
+	canopyClient := NewCanopyClient("d4ae64c9-bbb5-4814-9522-9e51d3d7c95b")
 
 	// Utiliser le nom de la marque comme mot-clé de recherche
 	brandName := strings.ToUpper(brandID[:1]) + brandID[1:]
@@ -1850,7 +1850,7 @@ func contains(slice []string, item string) bool {
 // getFallbackInspirationProducts récupère des produits génériques pour une inspiration
 func (sm *ScraperManager) getFallbackInspirationProducts(inspiration string) ([]Product, error) {
 	// Créer un client Canopy pour récupérer des produits
-	canopyClient := NewCanopyClient("2ea2fa43-aec8-4963-8c08-1b51191e81f8")
+	canopyClient := NewCanopyClient("d4ae64c9-bbb5-4814-9522-9e51d3d7c95b")
 
 	// Déterminer le mot-clé de recherche en fonction de l'inspiration
 	var searchTerm string
