@@ -141,6 +141,12 @@ func (h *ScraperHandler) GetAllBrands(c *gin.Context) {
 	cacheFilePath := "./cache/products_cache.json"
 	data, err := os.ReadFile(cacheFilePath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			log.Warn().Str("path", cacheFilePath).Msg("Fichier cache produits non trouvé pour GetAllBrands, retour d'une liste vide.")
+			c.JSON(http.StatusOK, []map[string]string{}) // Retourne une liste vide si le fichier n'existe pas
+			return
+		}
+		log.Error().Err(err).Str("path", cacheFilePath).Msg("Erreur lors de la lecture du fichier de cache pour GetAllBrands")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur lors de la lecture du fichier de cache"})
 		return
 	}
@@ -386,6 +392,12 @@ func (h *ScraperHandler) GetFilters(c *gin.Context) {
 	cacheFilePath := "./cache/products_cache.json"
 	data, err := os.ReadFile(cacheFilePath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			log.Warn().Str("path", cacheFilePath).Msg("Fichier cache produits non trouvé pour GetFilters, retour d'une liste vide.")
+			c.JSON(http.StatusOK, []map[string]interface{}{}) // Retourne une liste vide si le fichier n'existe pas
+			return
+		}
+		log.Error().Err(err).Str("path", cacheFilePath).Msg("Erreur lors de la lecture du fichier de cache pour GetFilters")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erreur lors de la lecture du cache"})
 		return
 	}
